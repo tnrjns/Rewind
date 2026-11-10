@@ -783,7 +783,7 @@ class ClipsPage(Page):
         paths = self._selected()
         m = QMenu(self)
         m.addAction("Open", lambda: winapi.open_path(paths[0]))
-        m.addAction("Show in folder", lambda: winapi.reveal_in_explorer(paths[0]))
+        m.addAction("Show in Finder" if IS_MAC else "Show in folder", lambda: winapi.reveal_in_explorer(paths[0]))
         m.addAction("Copy (paste into Discord etc.)", lambda: self._copy(paths))
         if len(paths) == 1:
             m.addAction("Rename…", lambda: self._rename(paths[0]))
