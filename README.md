@@ -34,6 +34,14 @@ Rewind always keeps the last 15–60 seconds of your screen in a buffer. Press a
 3. After that, open Rewind from the Desktop shortcut or the Start menu. While it's running in the tray, press **Alt + 0** from anywhere to bring the window up. Turn on *Launch when Windows starts* (General page) so Alt + 0 always works.
    - Shortcut missing? Double-click **Create Shortcut.bat**, or click *Create shortcut* on Rewind's General page.
 
+## Run from source (macOS)
+```
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
+.venv/bin/python main.py
+```
+`bin/rewind-audio` is a small ScreenCaptureKit helper that records the Mac's own sound. Build `Rewind.dmg` with `./build_macos.sh`.
+
 ## Default hotkeys
 | Action | Windows | macOS |
 |---|---|---|
@@ -43,40 +51,32 @@ Rewind always keeps the last 15–60 seconds of your screen in a buffer. Press a
 | Take screenshot | **Alt + F12** | **⌃⌥P** |
 | Open Rewind | **Alt + 0** | **⌃⌥0** |
 
-You can change all five on the **Hotkeys** page. Click a box, press the new combo, and it takes effect right away. If NVIDIA's overlay is still running, it probably owns Alt+F10 already. Either turn off NVIDIA Instant Replay or pick a different combo. Rewind tells you when a combo is taken.
+You can change all five on the **Hotkeys** page. Click a box, press the new combo, and it takes effect right away. Rewind tells you when a combo is taken. On Windows, NVIDIA's overlay often owns Alt+F10 already, so turn off NVIDIA Instant Replay or pick a different combo. On Mac, a combo needs ⌃ or ⌘, because macOS blocks ones that only use ⌥ and ⇧.
 
 ## Features
 - **Clip length:** 15–60 seconds, in 5-second steps (slider or quick chips)
 - **Bitrate:** 5–150 Mbps (slider or presets), with an estimate of the file size
-- **Encoder:** NVIDIA NVENC, AMD AMF or Intel Quick Sync, detected automatically. If none works, it uses the CPU (x264).
+- **Encoder:** the graphics chip does the work, found on its own: NVIDIA NVENC, AMD AMF or Intel Quick Sync on Windows, Apple VideoToolbox on Mac. If none works, it uses the CPU (x264).
 - **Codec:** H.264 or HEVC. Frame rate: 30, 60, 120 or 144. Resolution: native, 1440p, 1080p or 720p. Pick a monitor if you have more than one.
-- **Audio:** desktop audio, plus your microphone if you want it, with a volume control for each
-- **Full recordings:** open the **Recording** page for a live preview of the selected monitor and start/stop controls, or press **Alt + F11**. Rewind saves an MP4 with desktop audio and optional microphone audio, then resumes Instant Replay if it was on before. The preview is a desktop thumbnail and may not show exclusive-fullscreen content.
+- **Audio:** the sound your computer plays, plus your microphone if you want it, with a volume control for each
+- **Full recordings:** open the **Recording** page for a live preview of the selected monitor and start/stop controls, or press the record hotkey. Rewind saves an MP4 with desktop audio and optional microphone audio, then resumes Instant Replay if it was on before. The preview is a desktop thumbnail and may not show exclusive-fullscreen content.
 - **Clip sound:** chime, pop, blip or your own .wav, with adjustable volume
-- **Screenshots:** press Alt+F12, or use the button on Home or in the tray menu. They're saved as PNG or JPG in the same folder as your clips, with a shutter sound and a neutral "Screenshot" badge. They work over games because they use the same capture method as the recorder.
+- **Screenshots:** press the screenshot hotkey, or use the button on Home or in the tray / menu bar menu. They're saved as PNG or JPG in the same folder as your clips, with a shutter sound and a neutral "Screenshot" badge. They work over games because they use the same capture method as the recorder.
 - **Status icon:** a small pill tucked into the bottom-right corner by default. It says whether Rewind is ON or OFF. It changes to a green "Clip saved" when a clip lands. Clicks pass through it, it never takes focus, and it's hidden from screen capture, so it never shows up in your clips.
 - **Clips page:** thumbnails of your clips and screenshots, with filters for All, Clips and Screenshots. Double-click one to play it. Right-click to copy it (you can paste the file straight into Discord), rename it or delete it.
-- **Tray icon:** closing the window keeps Rewind running in the background. It can also start with Windows.
+- **Tray / menu bar icon:** closing the window keeps Rewind running in the background. It can also start when you log in.
 
 Clips and screenshots are saved to `Videos\Rewind` on Windows and `Movies/Rewind` on macOS. You can change the folder on the Replay page.
 
-## Run from source (macOS)
-```
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
-.venv/bin/python main.py
-```
-`bin/rewind-audio` is a small ScreenCaptureKit helper that records the Mac's own sound. Build `Rewind.dmg` with `./build_macos.sh`.
-
 ## Make a standalone .exe (optional)
 Run `build_exe.bat`. It creates `dist\Rewind\Rewind.exe`, which runs without Python. Keep everything in that folder together.
-
 
 ## Build `Installer.exe`
 Run `build_installer.bat` on a Windows build machine with Python 3.10+ and Inno Setup 6 installed. It creates `dist\Installer.exe`. The installer installs Rewind per-user, adds Start Menu and optional desktop shortcuts, and downloads FFmpeg from Gyan if it is not already installed. Internet access is required when downloading FFmpeg.
 
 ## Troubleshooting
-- **"FFmpeg wasn't found":** run `install.bat` again, or put `ffmpeg.exe` in `Rewind\ffmpeg\bin\`.
+- **"FFmpeg wasn't found" (Windows):** run `install.bat` again, or put `ffmpeg.exe` in `Rewind\ffmpeg\bin\`.
+- **Rewind can't record on a Mac:** turn Rewind on in System Settings → Privacy & Security → Screen & System Audio Recording, then quit and reopen it.
 - **Recording fails or looks choppy:** on the Replay page, change **Encoder** from Automatic to another option. The data folder (General → Open data folder) has `ffmpeg.log` with details.
 - **You can't see the status icon in a game:** games in exclusive fullscreen draw over everything. Switch the game to *Borderless* or *Windowed fullscreen*.
 - **Audio is slightly out of sync:** nudge **Audio sync offset** on the Replay page. Positive values fix sound that comes too early.
