@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpaci
 from . import sounds, theme, winapi
 from .recorder import ENCODERS, PERMISSION_NOTE
 from .tutorial import Tutorial
-from .settings import APP_VERSION, IS_MAC, data_dir
+from .settings import APP_VERSION, DEFAULT_HOTKEYS, IS_MAC, data_dir
 from .widgets import (Card, ChipGroup, ClipCard, HotkeyEdit, LiveDot, SliderControl, ToggleSwitch, make_combo,
                       rounded_pixmap, set_combo)
 
@@ -569,6 +569,10 @@ class HotkeysPage(Page):
         self.open.capturing_changed.connect(lambda on: ctrl.register_hotkeys(paused=True) if on else
                                             ctrl.register_hotkeys())
         self.row_open = c.add_row("Open Rewind", None, self.open)
+        reset = QPushButton("Reset to defaults")
+        reset.setCursor(Qt.PointingHandCursor)
+        reset.clicked.connect(self._reset)
+        c.add_row("Default keys", "Puts all five shortcuts back the way Rewind came", reset)
         self.v.addWidget(c)
         tip = QLabel("Tip: if a combo shows “in use”, another app or macOS already owns it. Combos need ⌃ or ⌘; "
                      "macOS blocks ones that only use ⌥ and ⇧." if IS_MAC else
@@ -580,6 +584,13 @@ class HotkeysPage(Page):
         self.finish()
         ctrl.hotkeys_changed.connect(self.on_status)
         self.on_status(ctrl.hotkey_status)
+
+    def _reset(self):
+        for name, edit in (("toggle", self.toggle), ("clip", self.clip), ("record", self.record),
+                           ("screenshot", self.shot), ("open", self.open)):
+            hk = dict(DEFAULT_HOTKEYS[name])
+            edit.set_hotkey(hk)
+            self.ctrl.set(f"hotkey_{name}", hk)
 
     def on_status(self, st):
         for key, row in (("toggle", self.row_toggle), ("clip", self.row_clip), ("record", self.row_record),
