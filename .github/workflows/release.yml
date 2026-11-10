@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - run: python -m PyInstaller --noconfirm --clean --windowed --name Rewind --icon assets\rewind.ico --collect-all pyaudiowpatch main.py
+      - name: Build Installer.exe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build\InstallerStage | Out-Null
+          Copy-Item -Recurse dist\Rewind\* build\InstallerStage
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" installer.iss
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/Installer.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - run: ./build_macos.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/Rewind.dmg
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" Installer.exe Rewind.dmg --repo "${{ github.repository }}" --draft --title "Rewind ${{ github.ref_name }}" --generate-notes
