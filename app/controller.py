@@ -4,7 +4,7 @@ import os
 import queue
 import threading
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QMimeData, QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -168,7 +168,15 @@ class Controller(QObject):
         if s.sound_enabled:
             sounds.play(s.sound_style, s.sound_volume, s.sound_custom)
         self.overlay.show_saved(dur)
+        if s.copy_after_save:
+            self.copy_files([path])
         self.clips_changed.emit()
+
+    def copy_files(self, paths):
+        """Put files on the clipboard so they paste straight into Discord, Finder or Explorer."""
+        md = QMimeData()
+        md.setUrls([QUrl.fromLocalFile(p) for p in paths])
+        QGuiApplication.clipboard().setMimeData(md)
 
     def _on_failed(self, msg):
         self.overlay.show_failed(msg)
@@ -178,6 +186,8 @@ class Controller(QObject):
         if s.sound_enabled:
             sounds.play(s.sound_style, s.sound_volume, s.sound_custom)
         self.overlay.show_recording_saved(dur)
+        if s.copy_after_save:
+            self.copy_files([path])
         self.clips_changed.emit()
         if self._resume_replay_after_recording:
             self._resume_replay_after_recording = False

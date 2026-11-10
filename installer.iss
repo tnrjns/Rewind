@@ -34,6 +34,7 @@ Name: "{autodesktop}\Rewind"; Filename: "{app}\Rewind.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Rewind.exe"; Description: "Launch Rewind"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\Rewind.exe"; Flags: nowait; Check: WizardSilent
 
 [Code]
 function FFmpegAvailable: Boolean;

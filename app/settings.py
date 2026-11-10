@@ -126,6 +126,7 @@ class Settings:
     launch_at_startup: bool = False
     tray_notice_shown: bool = False
     tutorial_done: bool = False
+    copy_after_save: bool = False
 
     # ------------------------------------------------------------------
     _lock = threading.Lock()

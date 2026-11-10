@@ -2,9 +2,9 @@
 import datetime
 import os
 
-from PySide6.QtCore import QEasingCurve, QMimeData, QPropertyAnimation, QRect, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpacityEffect,
+from PySide6.QtWidgets import (QFileDialog, QFrame, QGraphicsOpacityEffect,
                                QHBoxLayout, QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea,
                                QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
@@ -420,6 +420,11 @@ class ReplayPage(Page):
         self.length = SliderControl(15, 60, 5, s.clip_seconds, lambda v: f"{v} seconds")
         self.length.valueChanged.connect(lambda v: ctrl.set("clip_seconds", v))
         c1.add_row("Replay length", "Save anywhere from the last 15 seconds up to a full minute", self.length)
+        self.copy_after = ToggleSwitch()
+        self.copy_after.set_silent(s.copy_after_save)
+        self.copy_after.toggled.connect(lambda v: ctrl.set("copy_after_save", v))
+        c1.add_row("Copy each clip when it saves", "Paste it straight into Discord or a chat without opening the folder",
+                   self.copy_after)
         self.v.addWidget(c1)
 
         c2 = Card("Quality")
@@ -753,7 +758,7 @@ class ClipsPage(Page):
         self.count = QLabel("")
         self.count.setObjectName("Muted")
         self.v.addWidget(self.count)
-        hint = QLabel("Double-click to open · Right-click to copy (paste straight into Discord), rename or delete")
+        hint = QLabel("Double-click to open · Right-click to trim, copy (paste straight into Discord), rename or delete")
         hint.setObjectName("Muted")
         self.v.addWidget(hint)
         ctrl.clips_changed.connect(self.refresh)
@@ -803,15 +808,21 @@ class ClipsPage(Page):
         m.addAction("Show in Finder" if IS_MAC else "Show in folder", lambda: winapi.reveal_in_explorer(paths[0]))
         m.addAction("Copy (paste into Discord etc.)", lambda: self._copy(paths))
         if len(paths) == 1:
+            if paths[0].lower().endswith((".mp4", ".mkv", ".mov")) and self.ctrl.recorder.ffmpeg:
+                m.addAction("Trim…", lambda: self._trim(paths[0]))
             m.addAction("Rename…", lambda: self._rename(paths[0]))
         m.addSeparator()
         m.addAction(f"Delete{'' if len(paths) == 1 else f' {len(paths)} items'}", lambda: self._delete(paths))
         m.exec(self.grid.viewport().mapToGlobal(pos))
 
+    def _trim(self, path):
+        from .trim import TrimDialog
+        d = TrimDialog(self.ctrl.recorder.ffmpeg, path, self)
+        d.saved.connect(lambda _p: self.ctrl.clips_changed.emit())
+        d.exec()
+
     def _copy(self, paths):
-        md = QMimeData()
-        md.setUrls([QUrl.fromLocalFile(p) for p in paths])
-        QApplication.clipboard().setMimeData(md)
+        self.ctrl.copy_files(paths)
 
     def _rename(self, path):
         old = os.path.splitext(os.path.basename(path))
@@ -858,16 +869,29 @@ class GeneralPage(Page):
     def _update_clicked(self):
         u = self.ctrl.updates
         if u.status == "newer" and u.url:
-            QDesktopServices.openUrl(QUrl(u.url))
+            if u.can_install():
+                self.upd_btn.setEnabled(False)
+                self.upd_row.set_sub(f"Downloading Rewind {u.version}…")
+                u.install()
+            else:
+                QDesktopServices.openUrl(QUrl(u.url))
             return
         self.upd_btn.setEnabled(False)
         self.upd_row.set_sub("Checking…")
         u.check()
 
+    def _update_failed(self, msg):
+        self.upd_btn.setEnabled(True)
+        self.upd_row.set_sub(msg)
+
+    def _update_ready(self):
+        self.upd_row.set_sub("Restarting into the new version…")
+        QTimer.singleShot(400, self.ctrl.quit)
+
     def _update_checked(self, status, version, _url):
         self.upd_btn.setEnabled(True)
         if status == "newer":
-            self.upd_btn.setText(f"Download {version}")
+            self.upd_btn.setText(f"Update to {version}" if self.ctrl.updates.can_install() else f"Download {version}")
             self.upd_row.set_sub(f"Rewind {version} is out. You have {APP_VERSION}.")
         elif status == "current":
             self.upd_btn.setText("Check for updates")
@@ -906,6 +930,9 @@ class GeneralPage(Page):
         self.upd_btn.clicked.connect(self._update_clicked)
         self.upd_row = c2.add_row("Updates", "Rewind checks for a new version when it opens", self.upd_btn)
         ctrl.updates.checked.connect(self._update_checked)
+        ctrl.updates.progress.connect(self.upd_row.set_sub)
+        ctrl.updates.install_failed.connect(self._update_failed)
+        ctrl.updates.ready_to_restart.connect(self._update_ready)
         if ctrl.updates.status:
             self._update_checked(ctrl.updates.status, ctrl.updates.version, ctrl.updates.url)
         logs = QPushButton("Open data folder")
