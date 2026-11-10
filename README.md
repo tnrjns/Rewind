@@ -13,7 +13,7 @@
   <a href="https://github.com/tnrjns/Rewind/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/tnrjns/Rewind/ci.yml?branch=main&label=CI&style=flat-square" alt="CI"></a>
   <a href="https://github.com/tnrjns/Rewind/releases/latest"><img src="https://img.shields.io/github/v/release/tnrjns/Rewind?style=flat-square&color=555" alt="Latest release"></a>
   <a href="https://github.com/tnrjns/Rewind/releases"><img src="https://img.shields.io/github/downloads/tnrjns/Rewind/total?style=flat-square&color=555" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2011%20%7C%20macOS-555?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-Windows%2011%20%7C%20macOS%2013%2B-555?style=flat-square" alt="Platform">
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-555?style=flat-square" alt="License"></a>
 </p>
 
@@ -45,6 +45,17 @@ If you stream, or need scenes and overlays, use OBS. If you just want to catch t
   ```
   When Rewind opens, macOS asks for Screen Recording permission. Turn Rewind on in System Settings → Privacy & Security → Screen & System Audio Recording, then reopen it. Rewind downloads FFmpeg the first time Instant Replay turns on.
 
+## Default hotkeys
+| Action | Windows | macOS |
+|---|---|---|
+| Turn Instant Replay on/off | <kbd>Alt</kbd> + <kbd>F9</kbd> | <kbd>⌃</kbd><kbd>⌥</kbd><kbd>I</kbd> |
+| Save clip | <kbd>Alt</kbd> + <kbd>F10</kbd> | <kbd>⌃</kbd><kbd>⌥</kbd><kbd>S</kbd> |
+| Start/stop screen recording | <kbd>Alt</kbd> + <kbd>F11</kbd> | <kbd>⌃</kbd><kbd>⌥</kbd><kbd>R</kbd> |
+| Take screenshot | <kbd>Alt</kbd> + <kbd>F12</kbd> | <kbd>⌃</kbd><kbd>⌥</kbd><kbd>P</kbd> |
+| Open Rewind | <kbd>Alt</kbd> + <kbd>0</kbd> | <kbd>⌃</kbd><kbd>⌥</kbd><kbd>0</kbd> |
+
+You can change all five on the **Hotkeys** page. Click a box, press the new combo, and it takes effect right away. **Reset to defaults** puts all five back. Rewind tells you when a combo is taken. On Windows, NVIDIA's overlay often owns Alt+F10 already, so turn off NVIDIA Instant Replay or pick a different combo. On Mac, a combo needs ⌃ or ⌘, because macOS blocks ones that only use ⌥ and ⇧.
+
 ## Run from source (Windows)
 1. Unzip the `Rewind` folder somewhere permanent, like `Documents\Rewind`.
 2. Double-click **install.bat**. It installs the Python packages, downloads FFmpeg, adds Desktop and Start-menu shortcuts, then opens Rewind.
@@ -59,17 +70,6 @@ mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
 .venv/bin/python main.py
 ```
 `bin/rewind-audio` is a small ScreenCaptureKit helper that records the Mac's own sound. Build `Rewind.dmg` with `./build_macos.sh`.
-
-## Default hotkeys
-| Action | Windows | macOS |
-|---|---|---|
-| Turn Instant Replay on/off | **Alt + F9** | **⌃⌥I** |
-| Save clip | **Alt + F10** | **⌃⌥S** |
-| Start/stop screen recording | **Alt + F11** | **⌃⌥R** |
-| Take screenshot | **Alt + F12** | **⌃⌥P** |
-| Open Rewind | **Alt + 0** | **⌃⌥0** |
-
-You can change all five on the **Hotkeys** page. Click a box, press the new combo, and it takes effect right away. Rewind tells you when a combo is taken. On Windows, NVIDIA's overlay often owns Alt+F10 already, so turn off NVIDIA Instant Replay or pick a different combo. On Mac, a combo needs ⌃ or ⌘, because macOS blocks ones that only use ⌥ and ⇧.
 
 ## Features
 - **Clip length:** 15–60 seconds, in 5-second steps (slider or quick chips)
