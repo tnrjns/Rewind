@@ -35,6 +35,9 @@ def main():
     app.setFont(theme.ui_font())
     app.setStyleSheet(theme.stylesheet(theme.chevron_file(sub_dir("ui"))))
     app.setWindowIcon(theme.app_icon())
+    from app.widgets import WheelGuard
+    wheel_guard = WheelGuard(app)
+    app.installEventFilter(wheel_guard)
 
     from app.controller import Controller
     ctrl = Controller(app, autostart="--autostart" in sys.argv)

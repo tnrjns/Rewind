@@ -1,11 +1,30 @@
 """Custom animated widgets."""
-from PySide6.QtCore import (Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal)
+from PySide6.QtCore import (QEvent, QObject, Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, QTimer,
+                            Signal)
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QListView,
+from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QAbstractSlider, QAbstractSpinBox,
+                               QApplication, QComboBox, QScrollBar, QFrame, QHBoxLayout, QLabel, QListView,
                                QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from . import theme
 from .hotkeys import IS_MAC, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
+
+
+class WheelGuard(QObject):
+    """Scrolling over a dropdown, slider or number box scrolls the page instead of changing the setting."""
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.Wheel and isinstance(obj, (QComboBox, QAbstractSlider, QAbstractSpinBox)) \
+                and not isinstance(obj, QScrollBar):
+            if isinstance(obj, QComboBox) and obj.view().isVisible():
+                return False
+            p = obj.parentWidget()
+            while p is not None and not isinstance(p, QAbstractScrollArea):
+                p = p.parentWidget()
+            if p is not None:
+                QApplication.sendEvent(p.verticalScrollBar(), e)
+            return True
+        return False
 
 
 def steady_width(btn, texts):
