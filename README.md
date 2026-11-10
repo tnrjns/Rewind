@@ -78,6 +78,9 @@ mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
 - **Codec:** H.264 or HEVC. Frame rate: 30, 60, 120 or 144. Resolution: native, 1440p, 1080p or 720p. Pick a monitor if you have more than one.
 - **Audio:** the sound your computer plays, plus your microphone if you want it, with a volume control for each
 - **Full recordings:** open the **Recording** page for a live preview of the selected monitor and start/stop controls, or press the record hotkey. Rewind saves an MP4 with desktop audio and optional microphone audio, then resumes Instant Replay if it was on before. The preview is a desktop thumbnail and may not show exclusive-fullscreen content.
+- **Trim:** right-click a clip on the Clips page and pick Trim. The cut is saved as a new file and the original stays.
+- **Copy after save:** turn on "Copy each clip when it saves" on the Replay page and every new clip lands on your clipboard, ready to paste into Discord.
+- **Updates:** Rewind checks for a new version when it opens. From 1.3.0 on, General → Update installs it and reopens Rewind.
 - **Clip sound:** chime, pop, blip or your own .wav, with adjustable volume
 - **Screenshots:** press the screenshot hotkey, or use the button on Home or in the tray / menu bar menu. They're saved as PNG or JPG in the same folder as your clips, with a shutter sound and a neutral "Screenshot" badge. They work over games because they use the same capture method as the recorder.
 - **Status icon:** a small pill tucked into the bottom-right corner by default. It says whether Rewind is ON or OFF. It changes to a green "Clip saved" when a clip lands. Clicks pass through it, it never takes focus, and it's hidden from screen capture, so it never shows up in your clips.
