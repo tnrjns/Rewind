@@ -7,3 +7,4 @@ dist/
 ffmpeg/
 *.log
 .mypy_cache/
+bin/

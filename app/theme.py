@@ -24,7 +24,7 @@ WARN = "#E5B968"
 def ui_font_families():
     fams = set(QFontDatabase.families())
     out = [f for f in ("Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter") if f in fams]
-    return out or ["sans-serif"]
+    return out or [QFontDatabase.systemFont(QFontDatabase.GeneralFont).family()]
 
 
 def icon_font_family():

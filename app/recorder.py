@@ -15,6 +15,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -28,6 +29,7 @@ from .settings import app_base_dir, data_dir, sub_dir, IS_MAC, IS_WIN
 
 TEST_MODE = bool(os.environ.get("REWIND_TEST_SOURCE"))
 SEGMENT_WRAP = 75  # > 60 s max clip + headroom
+PERMISSION_NOTE = "Rewind needs permission to record your screen."
 
 ENCODERS = {
     "nvenc": {"h264": "h264_nvenc", "hevc": "hevc_nvenc", "label": "NVIDIA NVENC"},
@@ -43,14 +45,18 @@ _meta_lock = threading.Lock()
 # ---------------------------------------------------------------- helpers
 def find_ffmpeg():
     exe = "ffmpeg.exe" if IS_WIN else "ffmpeg"
-    base = app_base_dir()
-    for c in (os.path.join(base, "ffmpeg", "bin", exe), os.path.join(base, "ffmpeg", exe), os.path.join(base, exe)):
-        if os.path.isfile(c):
-            return c
+    for base in filter(None, (getattr(sys, "_MEIPASS", ""), app_base_dir())):
+        for c in (os.path.join(base, "ffmpeg", "bin", exe), os.path.join(base, "ffmpeg", exe),
+                  os.path.join(base, "bin", exe), os.path.join(base, exe)):
+            if os.path.isfile(c):
+                return c
     w = shutil.which("ffmpeg")
     if w:
         return w
     if IS_MAC:  # apps opened from Finder don't get Homebrew's PATH
+        own = os.path.join(sub_dir("ffmpeg"), "ffmpeg")
+        if os.path.isfile(own) and os.access(own, os.X_OK):
+            return own
         for c in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
             if os.path.isfile(c):
                 return c
@@ -60,6 +66,35 @@ def find_ffmpeg():
         if hits:
             return hits[0]
     return None
+
+
+MAC_FFMPEG_URL = "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"
+
+
+def download_ffmpeg_mac(log=lambda _m: None):
+    """Fetch a static FFmpeg build into Rewind's data folder (like the Windows installer does)."""
+    import urllib.request
+    import zipfile
+    dest = sub_dir("ffmpeg")
+    tmp = os.path.join(dest, "ffmpeg.zip")
+    try:
+        req = urllib.request.Request(MAC_FFMPEG_URL, headers={"User-Agent": "Rewind"})
+        with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f)
+        with zipfile.ZipFile(tmp) as z:
+            z.extract("ffmpeg", dest)
+        path = os.path.join(dest, "ffmpeg")
+        os.chmod(path, 0o755)
+        ok = run([path, "-hide_banner", "-version"], timeout=30).returncode == 0
+        if not ok:
+            os.remove(path)
+        return path if ok else None
+    except Exception as e:
+        log(f"ffmpeg download failed: {e!r}")
+        return None
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def run(cmd, timeout=60, cwd=None):
@@ -435,11 +470,24 @@ class Recorder(QObject):
         self._set_state("starting")
         if not self.ffmpeg:
             self.ffmpeg = find_ffmpeg()
+        if not self.ffmpeg and IS_MAC and not TEST_MODE:
+            self._log("downloading FFmpeg")
+            self.ffmpeg = download_ffmpeg_mac(self._log)
         if not self.ffmpeg:
             self.mode = "off"
             self._set_state("off")
-            msg = ("FFmpeg wasn't found. Install it with Homebrew: brew install ffmpeg" if IS_MAC else
+            msg = ("Couldn't download FFmpeg, which Rewind records with. Check your internet connection and "
+                   "turn Instant Replay on again." if IS_MAC else
                    "FFmpeg wasn't found. Run install.bat, or put ffmpeg.exe in Rewind's ffmpeg\\bin folder.")
+            if mode == "recording":
+                self.recording_failed.emit(msg)
+            self.error.emit(msg)
+            return
+        if IS_MAC and not TEST_MODE and not winapi.screen_capture_allowed(ask=True):
+            self.mode = "off"
+            self._set_state("off")
+            msg = (f"{PERMISSION_NOTE} Turn on Rewind in System Settings → Privacy & Security → "
+                   "Screen & System Audio Recording, then quit and reopen Rewind.")
             if mode == "recording":
                 self.recording_failed.emit(msg)
             self.error.emit(msg)

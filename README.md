@@ -13,16 +13,21 @@
   <a href="https://github.com/tnrjns/Rewind/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/tnrjns/Rewind/ci.yml?branch=main&label=CI&style=flat-square" alt="CI"></a>
   <a href="https://github.com/tnrjns/Rewind/releases/latest"><img src="https://img.shields.io/github/v/release/tnrjns/Rewind?style=flat-square&color=555" alt="Latest release"></a>
   <a href="https://github.com/tnrjns/Rewind/releases"><img src="https://img.shields.io/github/downloads/tnrjns/Rewind/total?style=flat-square&color=555" alt="Downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2011-555?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-Windows%2011%20%7C%20macOS-555?style=flat-square" alt="Platform">
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-555?style=flat-square" alt="License"></a>
 </p>
 
-Rewind always keeps the last 15–60 seconds of your screen in a buffer. Press a hotkey and those seconds are saved as a clip, with a sound to confirm. It runs on Windows 11. Mac and Linux are coming.
+Rewind always keeps the last 15–60 seconds of your screen in a buffer. Press a hotkey and those seconds are saved as a clip, with a sound to confirm. It runs on Windows 11 and macOS 13 or newer on Apple Silicon. Linux is coming.
 
 ## Download
-Get `Installer.exe` from the [latest release](https://github.com/tnrjns/Rewind/releases/latest) and run it. It sets up FFmpeg for you.
+- **Windows 11:** get `Installer.exe` from the [latest release](https://github.com/tnrjns/Rewind/releases/latest) and run it. It sets up FFmpeg for you.
+- **macOS 13+ (Apple Silicon):** get `Rewind.dmg` from the [latest release](https://github.com/tnrjns/Rewind/releases/latest), open it and drag Rewind into Applications. The app isn't signed by Apple yet, so the first time, run this once in Terminal:
+  ```
+  xattr -dr com.apple.quarantine /Applications/Rewind.app
+  ```
+  When Rewind opens, macOS asks for Screen Recording permission. Turn Rewind on in System Settings → Privacy & Security → Screen & System Audio Recording, then reopen it. Rewind downloads FFmpeg the first time Instant Replay turns on.
 
-## Run from source
+## Run from source (Windows)
 1. Unzip the `Rewind` folder somewhere permanent, like `Documents\Rewind`.
 2. Double-click **install.bat**. It installs the Python packages, downloads FFmpeg, adds Desktop and Start-menu shortcuts, then opens Rewind.
    - If Python isn't installed, the script installs it and asks you to run `install.bat` again.
@@ -30,13 +35,13 @@ Get `Installer.exe` from the [latest release](https://github.com/tnrjns/Rewind/r
    - Shortcut missing? Double-click **Create Shortcut.bat**, or click *Create shortcut* on Rewind's General page.
 
 ## Default hotkeys
-| Action | Hotkey |
-|---|---|
-| Turn Instant Replay on/off | **Alt + F9** |
-| Save clip | **Alt + F10** |
-| Start/stop screen recording | **Alt + F11** |
-| Take screenshot | **Alt + F12** |
-| Open Rewind | **Alt + 0** |
+| Action | Windows | macOS |
+|---|---|---|
+| Turn Instant Replay on/off | **Alt + F9** | **⌃⌥I** |
+| Save clip | **Alt + F10** | **⌃⌥S** |
+| Start/stop screen recording | **Alt + F11** | **⌃⌥R** |
+| Take screenshot | **Alt + F12** | **⌃⌥P** |
+| Open Rewind | **Alt + 0** | **⌃⌥0** |
 
 You can change all five on the **Hotkeys** page. Click a box, press the new combo, and it takes effect right away. If NVIDIA's overlay is still running, it probably owns Alt+F10 already. Either turn off NVIDIA Instant Replay or pick a different combo. Rewind tells you when a combo is taken.
 
@@ -53,7 +58,15 @@ You can change all five on the **Hotkeys** page. Click a box, press the new comb
 - **Clips page:** thumbnails of your clips and screenshots, with filters for All, Clips and Screenshots. Double-click one to play it. Right-click to copy it (you can paste the file straight into Discord), rename it or delete it.
 - **Tray icon:** closing the window keeps Rewind running in the background. It can also start with Windows.
 
-Clips and screenshots are saved to `Videos\Rewind`. You can change the folder on the Replay page.
+Clips and screenshots are saved to `Videos\Rewind` on Windows and `Movies/Rewind` on macOS. You can change the folder on the Replay page.
+
+## Run from source (macOS)
+```
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
+.venv/bin/python main.py
+```
+`bin/rewind-audio` is a small ScreenCaptureKit helper that records the Mac's own sound. Build `Rewind.dmg` with `./build_macos.sh`.
 
 ## Make a standalone .exe (optional)
 Run `build_exe.bat`. It creates `dist\Rewind\Rewind.exe`, which runs without Python. Keep everything in that folder together.

@@ -405,4 +405,4 @@ class Controller(QObject):
         self.recorder.shutdown()
         if self.tray is not None:
             self.tray.hide()
-        self.app.quit()
+        self.app.exit(0)  # quit() would ask the window to close, and it refuses (hides to the tray instead)

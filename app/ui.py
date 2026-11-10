@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpaci
                                QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from . import sounds, theme, winapi
-from .recorder import ENCODERS
+from .recorder import ENCODERS, PERMISSION_NOTE
 from .settings import APP_VERSION, IS_MAC, data_dir
 from .widgets import (Card, ChipGroup, ClipCard, HotkeyEdit, LiveDot, SliderControl, ToggleSwitch, make_combo,
                       rounded_pixmap, set_combo)
@@ -161,6 +161,11 @@ class HomePage(Page):
         self.banner.setWordWrap(True)
         self.banner.hide()
         self.v.addWidget(self.banner)
+        self.perm_btn = QPushButton("Open Screen Recording settings")
+        self.perm_btn.setCursor(Qt.PointingHandCursor)
+        self.perm_btn.clicked.connect(winapi.open_privacy_settings)
+        self.perm_btn.hide()
+        self.v.addWidget(self.perm_btn, 0, Qt.AlignLeft)
 
         btns = QHBoxLayout()
         btns.setSpacing(10)
@@ -269,6 +274,7 @@ class HomePage(Page):
     def on_message(self, msg):
         self.banner.setText(msg)
         self.banner.setVisible(bool(msg))
+        self.perm_btn.setVisible(msg.startswith(PERMISSION_NOTE))
 
     def _tick_buffer(self):
         s = self.ctrl.settings
@@ -878,7 +884,7 @@ class GeneralPage(Page):
         c2 = Card("About")
         ff = ctrl.recorder.ffmpeg
         c2.add_row(f"Rewind {APP_VERSION}", "Instant replay for macOS" if IS_MAC else "Instant replay for Windows 11", None)
-        c2.add_row("FFmpeg", ff or ("Not found. Install it with: brew install ffmpeg" if IS_MAC
+        c2.add_row("FFmpeg", ff or ("Downloads when Instant Replay first turns on" if IS_MAC
                                      else "Not found. Run install.bat"), None)
         self.upd_btn = QPushButton("Check for updates")
         self.upd_btn.setCursor(Qt.PointingHandCursor)

@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field, asdict, fields
 
 APP_NAME = "Rewind"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
@@ -91,7 +91,7 @@ class Settings:
     codec: str = "h264"             # h264 | hevc
     capture_cursor: bool = True
     # Audio
-    system_audio: bool = not IS_MAC
+    system_audio: bool = True
     system_volume: int = 100
     mic_enabled: bool = False
     mic_device: str = ""

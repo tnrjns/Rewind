@@ -63,6 +63,26 @@ def style_titlebar(hwnd: int, caption_rgb=None) -> None:
         pass
 
 
+def screen_capture_allowed(ask: bool = False) -> bool:
+    """macOS Screen Recording permission. With ask=True, macOS shows its prompt the first time."""
+    if not IS_MAC:
+        return True
+    try:
+        cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cg.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
+        cg.CGRequestScreenCaptureAccess.restype = ctypes.c_bool
+        if cg.CGPreflightScreenCaptureAccess():
+            return True
+        return bool(cg.CGRequestScreenCaptureAccess()) if ask else False
+    except Exception:
+        return True
+
+
+def open_privacy_settings() -> None:
+    if IS_MAC:
+        subprocess.Popen(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+
+
 def exclude_from_capture(hwnd: int) -> None:
     """Hide a window from screen capture (so the overlay never shows up in clips)."""
     if IS_MAC:

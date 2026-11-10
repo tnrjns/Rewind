@@ -40,8 +40,9 @@ def main():
     ctrl = Controller(app, autostart="--autostart" in sys.argv)
     server.newConnection.connect(lambda: (server.nextPendingConnection(), ctrl.show_window()))
     app.aboutToQuit.connect(ctrl.recorder.shutdown)
-    signal.signal(signal.SIGTERM, lambda *_: app.quit())
-    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    # exit() rather than quit(): quit() asks windows to close, and Rewind's window refuses (it hides to the tray)
+    signal.signal(signal.SIGTERM, lambda *_: app.exit(0))
+    signal.signal(signal.SIGINT, lambda *_: app.exit(0))
     wake = QTimer()  # lets Python run signal handlers while Qt's loop is idle
     wake.timeout.connect(lambda: None)
     wake.start(500)

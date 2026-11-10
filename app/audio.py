@@ -1,7 +1,8 @@
 """Rolling in-memory audio buffers (desktop audio + microphone).
 
 Windows captures through PyAudioWPatch (WASAPI loopback for desktop audio).
-Other platforms capture the microphone through sounddevice (PortAudio).
+Other platforms capture the microphone through sounddevice (PortAudio). On macOS,
+desktop audio comes from the bundled `rewind-audio` helper (ScreenCaptureKit).
 
 WASAPI loopback delivers *no data* while nothing is playing, so every chunk is
 time-stamped and gaps are filled with silence. That keeps audio locked to the
@@ -10,6 +11,8 @@ video no matter how long the desktop was quiet.
 import math
 import os
 import queue
+import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -271,8 +274,71 @@ class AudioCapture:
         self._finish_recording()
 
 
+def mac_audio_helper():
+    """Path of the ScreenCaptureKit helper, next to the app or inside the frozen bundle."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    roots = [getattr(sys, "_MEIPASS", ""), os.path.dirname(sys.executable), here]
+    for root in roots:
+        for rel in (os.path.join("bin", "rewind-audio"), "rewind-audio"):
+            path = os.path.join(root, rel)
+            if root and os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+    return None
+
+
+class MacLoopbackCapture(AudioCapture):
+    """macOS desktop audio: 48 kHz stereo s16le PCM streamed by the rewind-audio helper."""
+
+    RATE, CHANNELS, CHUNK = 48000, 2, 960
+
+    def start(self, record_path=None) -> bool:
+        helper = mac_audio_helper()
+        if helper is None:
+            self.error = "the rewind-audio helper is missing"
+            return False
+        try:
+            self.ring = PcmRing(self.RATE, self.CHANNELS)
+            self._open_recording(record_path)
+            self.stream = subprocess.Popen([helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+            line = self.stream.stderr.readline().decode(errors="replace").strip()
+            if line != "ready":
+                self.error = line.removeprefix("error: ") or "macOS didn't allow audio capture"
+                self.stop()
+                return False
+            self.started_at = time.monotonic()
+            self._record_end = self.started_at
+            threading.Thread(target=self._read, args=(self.stream,), daemon=True).start()
+            return True
+        except Exception as e:
+            self.error = str(e)
+            self.stop()
+            return False
+
+    def _read(self, proc):
+        size = self.CHUNK * self.CHANNELS * 2
+        while True:
+            data = proc.stdout.read(size)
+            if not data:
+                break
+            self._push(data, len(data) // (self.CHANNELS * 2))
+
+    def stop(self):
+        proc, self.stream = self.stream, None
+        if proc is not None:
+            try:
+                proc.stdin.close()
+                proc.wait(2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._finish_recording()
+
+
 class SoundDeviceCapture(AudioCapture):
-    """Microphone capture through PortAudio. Desktop audio needs ScreenCaptureKit and isn't wired up yet."""
+    """Microphone capture through PortAudio."""
 
     def start(self, record_path=None) -> bool:
         if self.kind == "loopback":
@@ -378,6 +444,8 @@ class FakeCapture:
 def make_capture(kind, device_name=""):
     if os.environ.get("REWIND_TEST_SOURCE"):
         return FakeCapture(kind, device_name)
+    if sys.platform == "darwin" and kind == "loopback":
+        return MacLoopbackCapture(kind, device_name)
     if pyaudio is None and sd is not None:
         return SoundDeviceCapture(kind, device_name)
     return AudioCapture(kind, device_name)
