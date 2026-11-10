@@ -15,6 +15,7 @@ from .overlay import Overlay
 from .recorder import (Recorder, load_meta, make_thumbnail, probe_duration, take_screenshot, thumb_path,
                        update_meta)
 from .settings import Settings
+from .updates import UpdateChecker
 
 RESTART_KEYS = {"bitrate_mbps", "fps", "resolution", "monitor", "encoder", "codec", "capture_cursor",
                 "system_audio", "mic_enabled", "mic_device"}
@@ -38,6 +39,8 @@ class Controller(QObject):
         self.settings = Settings.load()
         self.recorder = Recorder(self.settings)
         self.hotkeys = HotkeyManager()
+        self.updates = UpdateChecker()
+        self.updates.checked.connect(self._on_update_checked)
         self.overlay = Overlay(self.settings)
         self.hotkey_status = {}
         self.hotkey_dupes = set()
@@ -79,6 +82,12 @@ class Controller(QObject):
         if not (autostart or self.settings.start_minimized) or not QSystemTrayIcon.isSystemTrayAvailable():
             self.window.show()
         self.overlay.apply_settings()
+        QTimer.singleShot(8000, self.updates.check)
+
+    def _on_update_checked(self, status, version, _url):
+        if status == "newer" and self.tray is not None and not self.window.isVisible():
+            self.tray.showMessage("Rewind", f"Rewind {version} is out. Open Rewind → General to update.",
+                                  theme.app_icon(), 6000)
 
     # ------------------------------------------------------------ settings
     def set(self, key, value):
@@ -190,8 +199,8 @@ class Controller(QObject):
         mapping, self.hotkey_dupes = {}, set()
         for name, hk in (("toggle", s.hotkey_toggle), ("clip", s.hotkey_clip), ("record", s.hotkey_record),
                          ("shot", s.hotkey_screenshot), ("open", s.hotkey_open)):
-            combo = (hk.get("mods", 0), hk.get("vk", 0))
-            if combo[1] and combo in mapping.values():
+            combo = (hk.get("mods", 0), hk.get("vk"))
+            if combo[1] is not None and combo in mapping.values():
                 self.hotkey_dupes.add(name)
                 continue
             mapping[name] = combo

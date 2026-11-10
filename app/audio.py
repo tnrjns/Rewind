@@ -1,4 +1,7 @@
-"""Rolling in-memory audio buffers (desktop audio via WASAPI loopback + microphone).
+"""Rolling in-memory audio buffers (desktop audio + microphone).
+
+Windows captures through PyAudioWPatch (WASAPI loopback for desktop audio).
+Other platforms capture the microphone through sounddevice (PortAudio).
 
 WASAPI loopback delivers *no data* while nothing is playing, so every chunk is
 time-stamped and gaps are filled with silence. That keeps audio locked to the
@@ -15,6 +18,11 @@ try:
     import pyaudiowpatch as pyaudio  # Windows only
 except Exception:  # pragma: no cover
     pyaudio = None
+
+try:
+    import sounddevice as sd
+except Exception:  # pragma: no cover
+    sd = None
 
 MAX_SECONDS = 75
 
@@ -89,12 +97,17 @@ def _get_pa(fresh=False):
 
 
 def available() -> bool:
-    return pyaudio is not None
+    return pyaudio is not None or sd is not None
 
 
 def list_microphones() -> list:
     if pyaudio is None:
-        return []
+        if sd is None:
+            return []
+        try:
+            return [d["name"] for d in sd.query_devices() if d.get("max_input_channels", 0) > 0]
+        except Exception:
+            return []
     try:
         pa = _get_pa()
         wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
@@ -159,13 +172,7 @@ class AudioCapture:
             rate = int(dev["defaultSampleRate"])
             ch = max(1, min(8, int(dev["maxInputChannels"])))
             self.ring = PcmRing(rate, ch)
-            if record_path:
-                os.makedirs(os.path.dirname(record_path), exist_ok=True)
-                self._record_file = open(record_path, "wb")
-                self.record_error = ""
-                self._record_queue = queue.Queue()
-                self._record_thread = threading.Thread(target=self._write_recording, daemon=True)
-                self._record_thread.start()
+            self._open_recording(record_path)
             self.stream = pa.open(format=pyaudio.paInt16, channels=ch, rate=rate, input=True,
                                   input_device_index=dev["index"], frames_per_buffer=max(256, rate // 50),
                                   stream_callback=self._cb)
@@ -187,6 +194,20 @@ class AudioCapture:
             return False
 
     def _cb(self, data, frames, info, status):
+        self._push(data, frames)
+        return (None, pyaudio.paContinue)
+
+    def _open_recording(self, record_path):
+        if not record_path:
+            return
+        os.makedirs(os.path.dirname(record_path), exist_ok=True)
+        self._record_file = open(record_path, "wb")
+        self.record_error = ""
+        self._record_queue = queue.Queue()
+        self._record_thread = threading.Thread(target=self._write_recording, daemon=True)
+        self._record_thread.start()
+
+    def _push(self, data, frames):
         now = time.monotonic()
         self.ring.push(data, now)
         if self._record_queue is not None:
@@ -196,7 +217,6 @@ class AudioCapture:
                 self._record_queue.put(("silence", gap))
             self._record_queue.put(("data", data))
             self._record_end = max(now, self._record_end)
-        return (None, pyaudio.paContinue)
 
     def _write_recording(self):
         silence = bytes(self.ring.rate * self.ring.bpf)
@@ -248,6 +268,59 @@ class AudioCapture:
             self.stream = None
             with _pa_lock:
                 _active = max(0, _active - 1)
+        self._finish_recording()
+
+
+class SoundDeviceCapture(AudioCapture):
+    """Microphone capture through PortAudio. Desktop audio needs ScreenCaptureKit and isn't wired up yet."""
+
+    def start(self, record_path=None) -> bool:
+        if self.kind == "loopback":
+            self.error = "desktop audio isn't supported on this system yet"
+            return False
+        if sd is None:
+            self.error = "sounddevice is not installed"
+            return False
+        try:
+            index = None
+            if self.device_name:
+                for i, d in enumerate(sd.query_devices()):
+                    if d["name"] == self.device_name and d.get("max_input_channels", 0) > 0:
+                        index = i
+                        break
+            dev = sd.query_devices(index, "input")
+            rate = int(dev["default_samplerate"])
+            ch = max(1, min(2, int(dev["max_input_channels"])))
+            self.ring = PcmRing(rate, ch)
+            self._open_recording(record_path)
+            self.stream = sd.RawInputStream(samplerate=rate, channels=ch, dtype="int16", device=index,
+                                            blocksize=max(256, rate // 50), callback=self._sd_cb)
+            self.started_at = time.monotonic()
+            self._record_end = self.started_at
+            self.stream.start()
+            return True
+        except Exception as e:
+            self.error = str(e)
+            if self.stream is not None:
+                try:
+                    self.stream.close()
+                except Exception:
+                    pass
+            self.stream = None
+            self._finish_recording()
+            return False
+
+    def _sd_cb(self, indata, frames, time_info, status):
+        self._push(bytes(indata), frames)
+
+    def stop(self):
+        if self.stream is not None:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
         self._finish_recording()
 
 
@@ -305,4 +378,6 @@ class FakeCapture:
 def make_capture(kind, device_name=""):
     if os.environ.get("REWIND_TEST_SOURCE"):
         return FakeCapture(kind, device_name)
+    if pyaudio is None and sd is not None:
+        return SoundDeviceCapture(kind, device_name)
     return AudioCapture(kind, device_name)

@@ -3,7 +3,7 @@ import datetime
 import os
 
 from PySide6.QtCore import QEasingCurve, QMimeData, QPropertyAnimation, QRect, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QFont, QGuiApplication, QIcon, QPixmap
+from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpacityEffect,
                                QHBoxLayout, QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea,
@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpaci
 
 from . import sounds, theme, winapi
 from .recorder import ENCODERS
-from .settings import APP_VERSION, data_dir
+from .settings import APP_VERSION, IS_MAC, data_dir
 from .widgets import (Card, ChipGroup, ClipCard, HotkeyEdit, LiveDot, SliderControl, ToggleSwitch, make_combo,
                       rounded_pixmap, set_combo)
 
@@ -506,7 +506,7 @@ class ReplayPage(Page):
         self.enc.blockSignals(False)
         set_combo(self.enc, cur if cur in encs or cur == "auto" else "auto")
         found = ", ".join(ENCODERS[k]["label"] for k in encs if k != "x264") or "none (using CPU)"
-        self.enc_row.sub.setText(f"GPU encoders found: {found}")
+        self.enc_row.sub.setText(f"Hardware encoders found: {found}")
 
     def _pick_folder(self):
         d = QFileDialog.getExistingDirectory(self, "Choose where clips are saved", self.ctrl.settings.output_dir)
@@ -563,7 +563,9 @@ class HotkeysPage(Page):
                                             ctrl.register_hotkeys())
         self.row_open = c.add_row("Open Rewind", None, self.open)
         self.v.addWidget(c)
-        tip = QLabel("Tip: if a combo shows “in use”, another app (often the NVIDIA overlay, Discord or OBS) "
+        tip = QLabel("Tip: if a combo shows “in use”, another app or macOS already owns it. Combos need ⌃ or ⌘; "
+                     "macOS blocks ones that only use ⌥ and ⇧." if IS_MAC else
+                     "Tip: if a combo shows “in use”, another app (often the NVIDIA overlay, Discord or OBS) "
                      "already owns it. Pick a different one, or turn it off in that app.")
         tip.setObjectName("Muted")
         tip.setWordWrap(True)
@@ -832,6 +834,27 @@ class GeneralPage(Page):
         self.sc_row.set_sub("✓ Shortcut created on your Desktop and in the Start menu" if ok else
                             "Couldn't create the shortcut. Try running Create Shortcut.bat in the Rewind folder")
 
+    def _update_clicked(self):
+        u = self.ctrl.updates
+        if u.status == "newer" and u.url:
+            QDesktopServices.openUrl(QUrl(u.url))
+            return
+        self.upd_btn.setEnabled(False)
+        self.upd_row.set_sub("Checking…")
+        u.check()
+
+    def _update_checked(self, status, version, _url):
+        self.upd_btn.setEnabled(True)
+        if status == "newer":
+            self.upd_btn.setText(f"Download {version}")
+            self.upd_row.set_sub(f"Rewind {version} is out. You have {APP_VERSION}.")
+        elif status == "current":
+            self.upd_btn.setText("Check for updates")
+            self.upd_row.set_sub(f"You're on the newest version ({APP_VERSION}).")
+        else:
+            self.upd_btn.setText("Check for updates")
+            self.upd_row.set_sub("Couldn't reach GitHub. Check your connection and try again.")
+
     def __init__(self, ctrl):
         super().__init__("General", None)
         self.ctrl = ctrl
@@ -844,28 +867,39 @@ class GeneralPage(Page):
         self.boot = ToggleSwitch()
         self.boot.set_silent(s.launch_at_startup)
         self.boot.toggled.connect(lambda v: ctrl.set("launch_at_startup", v))
-        c.add_row("Launch when Windows starts", "Starts quietly in the system tray", self.boot)
+        c.add_row("Open at login" if IS_MAC else "Launch when Windows starts",
+                  "Starts quietly in the menu bar" if IS_MAC else "Starts quietly in the system tray", self.boot)
         self.mini = ToggleSwitch()
         self.mini.set_silent(s.start_minimized)
         self.mini.toggled.connect(lambda v: ctrl.set("start_minimized", v))
-        c.add_row("Always start minimized to the tray", None, self.mini)
+        c.add_row("Always start minimized to the " + ("menu bar" if IS_MAC else "tray"), None, self.mini)
         self.v.addWidget(c)
 
         c2 = Card("About")
         ff = ctrl.recorder.ffmpeg
-        c2.add_row(f"Rewind {APP_VERSION}", "Instant replay for Windows 11", None)
-        c2.add_row("FFmpeg", ff or "Not found. Run install.bat", None)
+        c2.add_row(f"Rewind {APP_VERSION}", "Instant replay for macOS" if IS_MAC else "Instant replay for Windows 11", None)
+        c2.add_row("FFmpeg", ff or ("Not found. Install it with: brew install ffmpeg" if IS_MAC
+                                     else "Not found. Run install.bat"), None)
+        self.upd_btn = QPushButton("Check for updates")
+        self.upd_btn.setCursor(Qt.PointingHandCursor)
+        self.upd_btn.clicked.connect(self._update_clicked)
+        self.upd_row = c2.add_row("Updates", "Rewind checks for a new version when it opens", self.upd_btn)
+        ctrl.updates.checked.connect(self._update_checked)
+        if ctrl.updates.status:
+            self._update_checked(ctrl.updates.status, ctrl.updates.version, ctrl.updates.url)
         logs = QPushButton("Open data folder")
         logs.clicked.connect(lambda: winapi.open_path(data_dir()))
         c2.add_row("Logs & settings", data_dir(), logs)
-        sc = QPushButton("Create shortcut")
-        sc.setCursor(Qt.PointingHandCursor)
-        sc.clicked.connect(self._make_shortcut)
-        self.sc_row = c2.add_row("Desktop shortcut",
-                                 "Adds Rewind to your Desktop and Start menu", sc)
+        if not IS_MAC:
+            sc = QPushButton("Create shortcut")
+            sc.setCursor(Qt.PointingHandCursor)
+            sc.clicked.connect(self._make_shortcut)
+            self.sc_row = c2.add_row("Desktop shortcut",
+                                     "Adds Rewind to your Desktop and Start menu", sc)
         quit_btn = QPushButton("Quit Rewind")
         quit_btn.clicked.connect(ctrl.quit)
-        c2.add_row("Close completely", "Closing the window keeps Rewind running in the tray", quit_btn)
+        c2.add_row("Close completely", "Closing the window keeps Rewind running in the " +
+                   ("menu bar" if IS_MAC else "tray"), quit_btn)
         self.v.addWidget(c2)
         self.finish()
 

@@ -8,11 +8,14 @@ from dataclasses import dataclass, field, asdict, fields
 APP_NAME = "Rewind"
 APP_VERSION = "1.0.0"
 IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
 
 
 def data_dir() -> str:
     if IS_WIN:
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    elif IS_MAC:
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
     else:
         base = os.path.join(os.path.expanduser("~"), ".local", "share")
     d = os.path.join(base, APP_NAME)
@@ -27,7 +30,7 @@ def sub_dir(name: str) -> str:
 
 
 def default_clips_dir() -> str:
-    videos = os.path.join(os.path.expanduser("~"), "Videos")
+    videos = os.path.join(os.path.expanduser("~"), "Movies" if IS_MAC else "Videos")
     if IS_WIN:
         try:
             import ctypes
@@ -57,6 +60,25 @@ def app_base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+if IS_MAC:
+    # macOS refuses hotkeys whose only modifiers are Option/Shift, so the defaults use Control + Option
+    DEFAULT_HOTKEYS = {
+        "toggle": {"mods": 3, "vk": 0x22, "text": "⌃⌥I"},
+        "clip": {"mods": 3, "vk": 0x01, "text": "⌃⌥S"},
+        "record": {"mods": 3, "vk": 0x0F, "text": "⌃⌥R"},
+        "screenshot": {"mods": 3, "vk": 0x23, "text": "⌃⌥P"},
+        "open": {"mods": 3, "vk": 0x1D, "text": "⌃⌥0"},
+    }
+else:
+    DEFAULT_HOTKEYS = {
+        "toggle": {"mods": 1, "vk": 0x78, "text": "Alt + F9"},
+        "clip": {"mods": 1, "vk": 0x79, "text": "Alt + F10"},
+        "record": {"mods": 1, "vk": 0x7A, "text": "Alt + F11"},
+        "screenshot": {"mods": 1, "vk": 0x7B, "text": "Alt + F12"},
+        "open": {"mods": 1, "vk": 0x30, "text": "Alt + 0"},
+    }
+
+
 @dataclass
 class Settings:
     # Replay
@@ -69,7 +91,7 @@ class Settings:
     codec: str = "h264"             # h264 | hevc
     capture_cursor: bool = True
     # Audio
-    system_audio: bool = True
+    system_audio: bool = not IS_MAC
     system_volume: int = 100
     mic_enabled: bool = False
     mic_device: str = ""
@@ -77,12 +99,12 @@ class Settings:
     audio_offset_ms: int = 0
     # Saving
     output_dir: str = field(default_factory=default_clips_dir)
-    # Hotkeys  (mods = Win32 MOD_* flags, vk = virtual-key code)
-    hotkey_toggle: dict = field(default_factory=lambda: {"mods": 1, "vk": 0x78, "text": "Alt + F9"})
-    hotkey_clip: dict = field(default_factory=lambda: {"mods": 1, "vk": 0x79, "text": "Alt + F10"})
-    hotkey_record: dict = field(default_factory=lambda: {"mods": 1, "vk": 0x7A, "text": "Alt + F11"})
-    hotkey_screenshot: dict = field(default_factory=lambda: {"mods": 1, "vk": 0x7B, "text": "Alt + F12"})
-    hotkey_open: dict = field(default_factory=lambda: {"mods": 1, "vk": 0x30, "text": "Alt + 0"})
+    # Hotkeys  (mods = MOD_* flags from hotkeys.py, vk = Win32 virtual-key code or macOS key code)
+    hotkey_toggle: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS["toggle"]))
+    hotkey_clip: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS["clip"]))
+    hotkey_record: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS["record"]))
+    hotkey_screenshot: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS["screenshot"]))
+    hotkey_open: dict = field(default_factory=lambda: dict(DEFAULT_HOTKEYS["open"]))
     # Screenshots
     screenshot_format: str = "png"  # png | jpg
     screenshot_sound: bool = True
@@ -136,7 +158,7 @@ class Settings:
         s.clip_seconds = max(15, min(60, s.clip_seconds))
         s.bitrate_mbps = max(2, min(200, s.bitrate_mbps))
         # the previous version defaulted to Ctrl + 0; move anyone still on that to Alt + 0
-        if s.hotkey_open.get("mods") == 2 and s.hotkey_open.get("vk") == 0x30:
+        if not IS_MAC and s.hotkey_open.get("mods") == 2 and s.hotkey_open.get("vk") == 0x30:
             s.hotkey_open = {"mods": 1, "vk": 0x30, "text": "Alt + 0"}
         return s
 

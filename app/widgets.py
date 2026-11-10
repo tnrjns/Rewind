@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, 
                                QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from . import theme
-from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
+from .hotkeys import IS_MAC, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
 
 
 class ToggleSwitch(QAbstractButton):
@@ -183,6 +183,15 @@ class HotkeyEdit(QPushButton):
 
     @staticmethod
     def _mods(qmods):
+        if IS_MAC:  # Qt swaps them on macOS: ControlModifier is Command, MetaModifier is Control
+            pairs = ((Qt.MetaModifier, MOD_CONTROL, "⌃"), (Qt.AltModifier, MOD_ALT, "⌥"),
+                     (Qt.ShiftModifier, MOD_SHIFT, "⇧"), (Qt.ControlModifier, MOD_WIN, "⌘"))
+            mods, parts = 0, []
+            for qm, flag, sym in pairs:
+                if qmods & qm:
+                    mods |= flag
+                    parts.append(sym)
+            return mods, parts
         mods, parts = 0, []
         if qmods & Qt.ControlModifier:
             mods |= MOD_CONTROL
@@ -206,12 +215,14 @@ class HotkeyEdit(QPushButton):
             self._end()
             return
         mods, parts = self._mods(e.modifiers())
+        sep = "" if IS_MAC else " + "
         if key in self.MODIFIER_KEYS:
-            self.setText(" + ".join(parts + ["…"]))
+            self.setText(sep.join(parts + ["…"]))
             return
-        vk = e.nativeVirtualKey() or key
-        name = _vk_name(vk, QKeySequence(key).toString() or f"Key {vk}")
-        self.hk = {"mods": mods, "vk": int(vk), "text": " + ".join(parts + [name])}
+        vk = e.nativeVirtualKey() if IS_MAC else (e.nativeVirtualKey() or key)
+        fallback = QKeySequence(key).toString() or f"Key {vk}"
+        name = fallback if IS_MAC else _vk_name(vk, fallback)
+        self.hk = {"mods": mods, "vk": int(vk), "text": sep.join(parts + [name])}
         self._end()
         self.changed.emit(dict(self.hk))
 

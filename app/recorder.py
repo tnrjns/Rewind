@@ -24,7 +24,7 @@ from PySide6.QtCore import QObject, Signal
 
 from . import winapi
 from .audio import make_capture
-from .settings import app_base_dir, data_dir, sub_dir, IS_WIN
+from .settings import app_base_dir, data_dir, sub_dir, IS_MAC, IS_WIN
 
 TEST_MODE = bool(os.environ.get("REWIND_TEST_SOURCE"))
 SEGMENT_WRAP = 75  # > 60 s max clip + headroom
@@ -33,6 +33,7 @@ ENCODERS = {
     "nvenc": {"h264": "h264_nvenc", "hevc": "hevc_nvenc", "label": "NVIDIA NVENC"},
     "amf": {"h264": "h264_amf", "hevc": "hevc_amf", "label": "AMD AMF"},
     "qsv": {"h264": "h264_qsv", "hevc": "hevc_qsv", "label": "Intel Quick Sync"},
+    "vt": {"h264": "h264_videotoolbox", "hevc": "hevc_videotoolbox", "label": "Apple VideoToolbox"},
     "x264": {"h264": "libx264", "hevc": "libx265", "label": "CPU (x264)"},
 }
 
@@ -49,6 +50,10 @@ def find_ffmpeg():
     w = shutil.which("ffmpeg")
     if w:
         return w
+    if IS_MAC:  # apps opened from Finder don't get Homebrew's PATH
+        for c in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
+            if os.path.isfile(c):
+                return c
     if IS_WIN:
         local = os.environ.get("LOCALAPPDATA", "")
         hits = glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages", "*FFmpeg*", "*", "bin", "ffmpeg.exe"))
@@ -116,6 +121,19 @@ def make_thumbnail(ffmpeg, video, duration=None):
     return None
 
 
+_avf_screens: dict = {}
+
+
+def avf_screen_input(ffmpeg, monitor_idx):
+    """AVFoundation input name for a display ("<device index>:none"), cached per FFmpeg binary."""
+    if ffmpeg not in _avf_screens:
+        r = run([ffmpeg, "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""], timeout=15)
+        _avf_screens[ffmpeg] = [int(m) for m in re.findall(rb"\[(\d+)\] Capture screen \d+", r.stderr or b"")]
+    screens = _avf_screens[ffmpeg]
+    dev = screens[monitor_idx] if 0 <= monitor_idx < len(screens) else (screens[0] if screens else 0)
+    return f"{dev}:none"
+
+
 def take_screenshot(ffmpeg, monitor_idx, out_path, cursor=True):
     """Grab one frame of a monitor with DXGI desktop duplication (works over games)."""
     jpg = out_path.lower().endswith((".jpg", ".jpeg"))
@@ -123,6 +141,10 @@ def take_screenshot(ffmpeg, monitor_idx, out_path, cursor=True):
     pix = "yuvj444p" if jpg else "rgb24"
     if TEST_MODE:
         src = ["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30"]
+        vf = f"format={pix}"
+    elif IS_MAC:
+        src = ["-f", "avfoundation", "-capture_cursor", "1" if cursor else "0", "-framerate", "30",
+               "-pixel_format", "bgr0", "-i", avf_screen_input(ffmpeg, monitor_idx)]
         vf = f"format={pix}"
     else:
         src = ["-f", "lavfi", "-i", f"ddagrab=output_idx={monitor_idx}:framerate=30:draw_mouse={1 if cursor else 0}"]
@@ -143,6 +165,8 @@ def encoder_args(key, codec, mbps, fps):
         return ["-c:v", name, "-usage", "transcoding", "-quality", "balanced", "-rc", "cbr"] + common
     if key == "qsv":
         return ["-c:v", name, "-preset", "veryfast"] + common
+    if key == "vt":
+        return ["-c:v", name, "-realtime", "1", "-bf", "0"] + common
     if codec == "hevc":
         return ["-c:v", name, "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-x265-params", "log-level=error"] + common
     return ["-c:v", name, "-preset", "veryfast", "-pix_fmt", "yuv420p"] + common
@@ -187,6 +211,7 @@ class Recorder(QObject):
         self._enc_lock = threading.Lock()
         self._q = queue.Queue()
         self._revives = []
+        self._kill_stale_ffmpeg()
         threading.Thread(target=self._worker, daemon=True).start()
         threading.Thread(target=self._watchdog, daemon=True).start()
 
@@ -220,7 +245,7 @@ class Recorder(QObject):
                 return self.encoders
             found = []
             if self.ffmpeg and not TEST_MODE:
-                for key in ("nvenc", "amf", "qsv"):
+                for key in (("vt",) if IS_MAC else ("nvenc", "amf", "qsv")):
                     r = run([self.ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
                              "-i", "color=black:s=640x360:r=30", "-frames:v", "3",
                              "-c:v", ENCODERS[key]["h264"], "-f", "null", "-"], timeout=20)
@@ -326,6 +351,16 @@ class Recorder(QObject):
             src = ["-re", "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate={fps}"]
             attempts.append(("test", src, ["-vf", "format=yuv420p"], "x264", "1280×720"))
             return attempts
+        if IS_MAC:
+            avf = ["-f", "avfoundation", "-capture_cursor", cur, "-framerate", str(fps), "-pixel_format", "nv12",
+                   "-i", avf_screen_input(self.ffmpeg, idx)]
+            pix = "yuv420p" if key == "x264" else "nv12"
+            cfr = ["-fps_mode", "cfr", "-r", str(fps)]
+            attempts.append(("avfoundation", avf, cfr + ["-vf", f"{scale.lstrip(',') or 'null'},format={pix}"], key, size))
+            if key != "x264":
+                attempts.append(("avfoundation-cpu", avf, cfr + ["-vf", f"{scale.lstrip(',') or 'null'},format=yuv420p"],
+                                 "x264", size))
+            return attempts
         dda = ["-f", "lavfi", "-i", f"ddagrab=output_idx={idx}:framerate={fps}:draw_mouse={cur}"]
         pix = "yuv420p" if key == "x264" else "nv12"
         if key in ("nvenc", "amf") and not target_h:
@@ -358,7 +393,8 @@ class Recorder(QObject):
         except OSError as e:
             self._log(f"launch failed: {e}")
             return False
-        deadline = time.monotonic() + 7
+        self._write_pid(proc.pid)
+        deadline = time.monotonic() + (12 if IS_MAC else 7)  # AVFoundation takes a few seconds to open a display
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 self._log(f"{name} exited with {proc.returncode}")
@@ -402,7 +438,8 @@ class Recorder(QObject):
         if not self.ffmpeg:
             self.mode = "off"
             self._set_state("off")
-            msg = "FFmpeg wasn't found. Run install.bat, or put ffmpeg.exe in Rewind's ffmpeg\\bin folder."
+            msg = ("FFmpeg wasn't found. Install it with Homebrew: brew install ffmpeg" if IS_MAC else
+                   "FFmpeg wasn't found. Run install.bat, or put ffmpeg.exe in Rewind's ffmpeg\\bin folder.")
             if mode == "recording":
                 self.recording_failed.emit(msg)
             self.error.emit(msg)
@@ -497,6 +534,33 @@ class Recorder(QObject):
         for cap in self._audio.values():
             cap.stop()
         self._audio = {}
+
+    def _pid_path(self):
+        return os.path.join(data_dir(), "ffmpeg.pid")
+
+    def _write_pid(self, pid):
+        try:
+            with open(self._pid_path(), "w") as f:
+                f.write(str(pid))
+        except OSError:
+            pass
+
+    def _kill_stale_ffmpeg(self):
+        """An FFmpeg left over from a Rewind that was force-quit still holds the screen; stop it."""
+        try:
+            with open(self._pid_path()) as f:
+                pid = int(f.read().strip())
+            os.remove(self._pid_path())
+        except (OSError, ValueError):
+            return
+        if IS_WIN:
+            return
+        r = run(["ps", "-p", str(pid), "-o", "command="], timeout=5)
+        if self.buf_dir.encode() in (r.stdout or b"") or self.work_dir.encode() in (r.stdout or b""):
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
 
     def _do_stop(self, emit=True):
         previous_mode = self.mode

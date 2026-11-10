@@ -1,10 +1,12 @@
-"""Small Win32 helpers. Every function is a safe no-op on other platforms."""
+"""Small OS helpers (Win32, plus macOS where it has an equivalent). Safe no-ops elsewhere."""
 import os
 import subprocess
 import sys
 
 IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
 CREATE_NO_WINDOW = 0x08000000
+LAUNCH_AGENT = os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents", "com.rewind.instantreplay.plist")
 
 if IS_WIN:
     import ctypes
@@ -12,6 +14,21 @@ if IS_WIN:
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     dwmapi = ctypes.WinDLL("dwmapi")
+
+if IS_MAC:
+    import ctypes
+
+    _objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+    _objc.objc_getClass.restype = ctypes.c_void_p
+    _objc.sel_registerName.restype = ctypes.c_void_p
+    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+
+    def _msg(obj, sel, *args, restype=ctypes.c_void_p, argtypes=()):
+        f = ctypes.CFUNCTYPE(restype, ctypes.c_void_p, ctypes.c_void_p, *argtypes)(("objc_msgSend", _objc))
+        return f(obj, _objc.sel_registerName(sel.encode()), *args)
+
+    def _ns_window(view: int):
+        return _msg(ctypes.c_void_p(view), "window") if view else None
 
 
 def popen_kwargs() -> dict:
@@ -48,6 +65,16 @@ def style_titlebar(hwnd: int, caption_rgb=None) -> None:
 
 def exclude_from_capture(hwnd: int) -> None:
     """Hide a window from screen capture (so the overlay never shows up in clips)."""
+    if IS_MAC:
+        try:
+            win = _ns_window(hwnd)
+            if win:
+                _msg(win, "setSharingType:", 0, restype=None, argtypes=(ctypes.c_ulong,))  # NSWindowSharingNone
+                # show on every Space and over full-screen apps
+                _msg(win, "setCollectionBehavior:", (1 << 0) | (1 << 8), restype=None, argtypes=(ctypes.c_ulong,))
+        except Exception:
+            pass
+        return
     if not IS_WIN:
         return
     try:
@@ -67,7 +94,19 @@ def make_topmost(hwnd: int) -> None:
 
 
 def list_monitors() -> list:
-    """Monitors in physical pixels, in the same order DXGI/ddagrab numbers them."""
+    """Monitors in physical pixels, in the same order the screen grabber numbers them."""
+    if IS_MAC:
+        mons = []
+        try:
+            from PySide6.QtGui import QGuiApplication
+            for i, scr in enumerate(QGuiApplication.screens()):
+                g, dpr = scr.geometry(), scr.devicePixelRatio()
+                mons.append({"name": f"Display {i + 1}", "x": int(g.x() * dpr), "y": int(g.y() * dpr),
+                             "w": int(g.width() * dpr) // 2 * 2, "h": int(g.height() * dpr) // 2 * 2,
+                             "primary": i == 0})
+        except Exception:
+            pass
+        return mons or [{"name": "Display 1", "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}]
     if not IS_WIN:
         return [{"name": "Display 1", "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}]
     mons = []
@@ -123,6 +162,13 @@ OPEN_HOTKEY = ""
 
 def bring_to_front(hwnd: int) -> None:
     """Restore + focus a window even when another app (e.g. a game) is in front."""
+    if IS_MAC:
+        try:
+            app = _msg(_objc.objc_getClass(b"NSApplication"), "sharedApplication")
+            _msg(app, "activateIgnoringOtherApps:", True, restype=None, argtypes=(ctypes.c_bool,))
+        except Exception:
+            pass
+        return
     if not IS_WIN:
         return
     try:
@@ -174,7 +220,32 @@ def create_shortcuts(hotkey: str = OPEN_HOTKEY) -> bool:
         return False
 
 
+def _launch_args() -> list:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--autostart"]
+    main = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
+    return [sys.executable, main, "--autostart"]
+
+
+def _set_launch_agent(enabled: bool) -> bool:
+    import plistlib
+    try:
+        if not enabled:
+            if os.path.exists(LAUNCH_AGENT):
+                os.remove(LAUNCH_AGENT)
+            return True
+        os.makedirs(os.path.dirname(LAUNCH_AGENT), exist_ok=True)
+        with open(LAUNCH_AGENT, "wb") as f:
+            plistlib.dump({"Label": "com.rewind.instantreplay", "ProgramArguments": _launch_args(),
+                           "RunAtLoad": True, "ProcessType": "Interactive"}, f)
+        return True
+    except OSError:
+        return False
+
+
 def set_run_at_startup(enabled: bool) -> bool:
+    if IS_MAC:
+        return _set_launch_agent(enabled)
     if not IS_WIN:
         return False
     try:
@@ -196,6 +267,8 @@ def open_path(path: str) -> None:
     try:
         if IS_WIN:
             os.startfile(path)  # noqa
+        elif IS_MAC:
+            subprocess.Popen(["open", path])
         else:
             subprocess.Popen(["xdg-open", path])
     except Exception:
@@ -206,6 +279,8 @@ def reveal_in_explorer(path: str) -> None:
     try:
         if IS_WIN:
             subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
+        elif IS_MAC:
+            subprocess.Popen(["open", "-R", path])
         else:
             subprocess.Popen(["xdg-open", os.path.dirname(path)])
     except Exception:

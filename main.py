@@ -1,7 +1,8 @@
-"""Rewind — instant replay for Windows 11."""
+"""Rewind — instant replay for your screen."""
+import signal
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication
 
@@ -39,6 +40,11 @@ def main():
     ctrl = Controller(app, autostart="--autostart" in sys.argv)
     server.newConnection.connect(lambda: (server.nextPendingConnection(), ctrl.show_window()))
     app.aboutToQuit.connect(ctrl.recorder.shutdown)
+    signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    wake = QTimer()  # lets Python run signal handlers while Qt's loop is idle
+    wake.timeout.connect(lambda: None)
+    wake.start(500)
     return app.exec()
 
 
