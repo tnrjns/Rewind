@@ -19,6 +19,24 @@
 
 Rewind always keeps the last 15–60 seconds of your screen in a buffer. Press a hotkey and those seconds are saved as a clip, with a sound to confirm. It runs on Windows 11 and macOS 13 or newer on Apple Silicon. Linux is coming.
 
+## How it's different from OBS
+OBS Studio is built for streaming and long recordings: scenes, sources, filters and plugins. Rewind does one thing. It keeps the last 15–60 seconds of your screen ready, and one key turns them into a clip.
+
+- **Nothing to set up.** Open it and Instant Replay is already running. There are no scenes or sources to build.
+- **Always on, barely there.** It lives in the tray (Windows) or menu bar (Mac). A small status pill shows that it's running, and it never shows up in your clips.
+- **One key per job.** Save the replay, start or stop a recording, or take a screenshot, each with its own hotkey that works even in a game.
+- **Lighter.** Measured on the same Mac with the same settings:
+
+| | Rewind 1.1.0 | OBS Studio 33.0.1 |
+|---|---|---|
+| CPU | 14% of one core | 19% of one core |
+| Memory | 308 MB | 428 MB |
+| App size | 74 MB | 487 MB |
+
+Both kept a 30 second replay buffer of a 1080p, 60 fps screen with Apple's hardware H.264 encoder at 6 Mbps, on an Apple M6 Mac running macOS 27. Rewind recorded desktop audio; OBS used a single screen capture source. CPU and memory are averaged over 30 seconds and count every process each app runs.
+
+If you stream, or need scenes and overlays, use OBS. If you just want to catch the moment that already happened, use Rewind.
+
 ## Download
 - **Windows 11:** get `Installer.exe` from the [latest release](https://github.com/tnrjns/Rewind/releases/latest) and run it. It sets up FFmpeg for you.
 - **macOS 13+ (Apple Silicon):** get `Rewind.dmg` from the [latest release](https://github.com/tnrjns/Rewind/releases/latest), open it and drag Rewind into Applications. The app isn't signed by Apple yet, so the first time, run this once in Terminal:
