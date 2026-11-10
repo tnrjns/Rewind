@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field, asdict, fields
 
 APP_NAME = "Rewind"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
