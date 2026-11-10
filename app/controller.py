@@ -14,7 +14,7 @@ from .hotkeys import HotkeyManager
 from .overlay import Overlay
 from .recorder import (Recorder, load_meta, make_thumbnail, probe_duration, take_screenshot, thumb_path,
                        update_meta)
-from .settings import Settings
+from .settings import IS_MAC, Settings
 from .updates import UpdateChecker
 
 RESTART_KEYS = {"bitrate_mbps", "fps", "resolution", "monitor", "encoder", "codec", "capture_cursor",
@@ -394,8 +394,9 @@ class Controller(QObject):
             activity = "Screen recording keeps working in the background." if self.recorder.mode == "recording" \
                        else "Instant Replay keeps working in the background."
             self.tray.showMessage("Rewind is still running",
-                                  activity + " "
-                                  "Right-click the tray icon to quit.", theme.app_icon(), 5000)
+                                  activity + " " +
+                                  ("Click the Rewind icon in the menu bar to quit." if IS_MAC else
+                                   "Right-click the tray icon to quit."), theme.app_icon(), 5000)
             self.set("tray_notice_shown", True)
 
     def quit(self):
