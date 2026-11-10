@@ -8,6 +8,19 @@ from . import theme
 from .hotkeys import IS_MAC, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
 
 
+def steady_width(btn, texts):
+    """Size a button for its longest label so it never resizes, and nothing next to it shifts."""
+    btn.ensurePolished()
+    current = btn.text()
+    widest = 0
+    for t in texts:
+        btn.setText(t)
+        widest = max(widest, btn.sizeHint().width())
+    btn.setText(current)
+    btn.setMinimumWidth(widest)
+    btn.setMinimumHeight(btn.sizeHint().height())
+
+
 class ToggleSwitch(QAbstractButton):
     """iOS/Win11-style switch with an eased knob."""
 
@@ -62,7 +75,7 @@ class ToggleSwitch(QAbstractButton):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         t = self._knob
-        off = QColor("#363636") if not self._hover else QColor("#4A4A4A")
+        off = QColor("#4A4A4A") if not self._hover else QColor("#5A5A5A")
         track = theme.mix(off, QColor(theme.ACCENT), t)
         if not self.isEnabled():
             track.setAlpha(110)
@@ -74,7 +87,7 @@ class ToggleSwitch(QAbstractButton):
         x = m + t * (w - 2 * m - d)
         p.setBrush(QColor(0, 0, 0, 40))
         p.drawEllipse(QRectF(x, m + 1, d, d))
-        p.setBrush(QColor("white") if self.isEnabled() else QColor("#9AA0AE"))
+        p.setBrush(QColor("white") if self.isEnabled() else QColor("#8A8A8A"))
         p.drawEllipse(QRectF(x, m, d, d))
 
 

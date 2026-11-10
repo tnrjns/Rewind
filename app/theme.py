@@ -16,7 +16,7 @@ FIELD = "#292929"
 BORDER = "#353535"
 TEXT = "#F2F2F2"
 MUTED = "#A3A3A3"
-SUBTLE = "#747474"
+SUBTLE = "#8C8C8C"
 GREEN = "#65C98A"
 WARN = "#E5B968"
 
@@ -161,11 +161,16 @@ QPushButton {{ background: {FIELD}; border: 1px solid {BORDER}; border-radius: 6
 QPushButton:hover {{ background: #383838; border-color: #555555; }}
 QPushButton:pressed {{ background: #202020; }}
 QPushButton:disabled {{ color: {SUBTLE}; }}
+QPushButton:focus {{ border: 1px solid {ACCENT}; }}
+QComboBox:focus, QSpinBox:focus, QLineEdit:focus {{ border: 1px solid {ACCENT}; }}
 QPushButton#Primary {{ border: none; color: #111111; font-weight: 700; padding: 12px 20px;
     background: {ACCENT}; }}
 QPushButton#Primary:hover {{ background: #FFFFFF; }}
 QPushButton#Primary:pressed {{ background: #BDBDBD; }}
 QPushButton#Primary:disabled {{ background: #3A3A3A; color: {SUBTLE}; }}
+QPushButton#Primary:focus {{ border: 2px solid #FFFFFF; padding: 10px 18px; }}
+QPushButton#Primary[quiet="true"] {{ background: #383838; color: {TEXT}; }}
+QPushButton#Primary[quiet="true"]:hover {{ background: #444444; }}
 QPushButton#Chip {{ background: {FIELD}; border: 1px solid {BORDER}; border-radius: 15px; padding: 6px 14px;
                     color: {MUTED}; font-weight: 600; }}
 QPushButton#Chip:hover {{ color: {TEXT}; border-color: #666666; }}

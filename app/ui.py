@@ -13,7 +13,7 @@ from . import sounds, theme, winapi
 from .recorder import ENCODERS, PERMISSION_NOTE
 from .tutorial import Tutorial
 from .settings import APP_VERSION, DEFAULT_HOTKEYS, IS_MAC, data_dir
-from .widgets import (Card, ChipGroup, ClipCard, HotkeyEdit, LiveDot, SliderControl, ToggleSwitch, make_combo,
+from .widgets import (steady_width, Card, ChipGroup, ClipCard, HotkeyEdit, LiveDot, SliderControl, ToggleSwitch, make_combo,
                       rounded_pixmap, set_combo)
 
 NAV = [("home", "Home", ""), ("replay", "Replay", ""), ("recording", "Recording", "●"),
@@ -183,6 +183,10 @@ class HomePage(Page):
         folder = QPushButton("Open clips folder")
         folder.setCursor(Qt.PointingHandCursor)
         folder.clicked.connect(ctrl.open_clips_folder)
+        # their text changes (clip length, recording on/off), so fix their widths to the longest text
+        # instead of letting every button after them shift
+        QTimer.singleShot(0, lambda: (steady_width(self.save_btn, [f"Save last {n}s" for n in (15, 30, 45, 60)]),
+                                      steady_width(self.record_btn, ["Start screen recording", "Stop recording", "Saving recording…"])))
         btns.addWidget(self.save_btn)
         btns.addWidget(self.record_btn)
         btns.addWidget(self.shot_btn)
@@ -248,7 +252,7 @@ class HomePage(Page):
                                 "Warming up the encoder…")
         else:
             hk = s.hotkey_toggle.get("text") or "the switch"
-            self.detail.setText(f"Flip the switch or press {hk} to start recording in the background")
+            self.detail.setText(f"Flip the switch or press {hk} to start Instant Replay")
 
     def on_state(self, st):
         r = self.ctrl.recorder
@@ -262,6 +266,7 @@ class HomePage(Page):
                 {"on": "Replay On", "starting": "Starting…", "saving": "Saving…"}.get(st, "Off")
         self.state_lbl.setText(label)
         self.save_btn.setEnabled(st == "on" and r.mode == "replay")
+        self.save_btn.setToolTip("" if self.save_btn.isEnabled() else "Turn on Instant Replay first")
         self.record_btn.setEnabled(st != "saving")
         if st == "saving":
             self.record_btn.setText("Saving recording…")
@@ -834,14 +839,12 @@ class ClipsPage(Page):
     def _delete(self, paths):
         from PySide6.QtCore import QFile
         what = "this file" if len(paths) == 1 else f"these {len(paths)} files"
-        if QMessageBox.question(self, "Delete", f"Move {what} to the Recycle Bin?") != QMessageBox.Yes:
+        if QMessageBox.question(self, "Delete", f"Move {what} to the {'Trash' if IS_MAC else 'Recycle Bin'}?") != QMessageBox.Yes:
             return
-        for p in paths:
-            if not QFile.moveToTrash(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
+        failed = [p for p in paths if not QFile.moveToTrash(p)]
+        if failed:
+            QMessageBox.warning(self, "Delete", f"Couldn't move {len(failed)} file(s) to the "
+                                f"{'Trash' if IS_MAC else 'Recycle Bin'}, so nothing was deleted for them.")
         self.ctrl.clips_changed.emit()
 
 
@@ -871,7 +874,7 @@ class GeneralPage(Page):
             self.upd_row.set_sub(f"You're on the newest version ({APP_VERSION}).")
         else:
             self.upd_btn.setText("Check for updates")
-            self.upd_row.set_sub("Couldn't reach GitHub. Check your connection and try again.")
+            self.upd_row.set_sub("Couldn't check for updates. Check your connection and try again.")
 
     def __init__(self, ctrl):
         super().__init__("General", None)

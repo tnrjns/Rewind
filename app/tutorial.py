@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPus
                                QWidget, QFrame)
 
 from . import theme, winapi
+from .widgets import steady_width
 from .settings import IS_MAC
 
 TRAY = "menu bar" if IS_MAC else "tray"
@@ -33,8 +34,8 @@ class Tutorial(QWidget):
                 "wait": "Waiting for permission…",
             })
         self.steps += [
-            {"key": "welcome", "title": "Rewind is already recording",
-             "body": f"It keeps the last {s.clip_seconds} seconds of your screen in memory, all the time. "
+            {"key": "welcome", "title": "Instant Replay is on",
+             "body": f"Rewind keeps the last {s.clip_seconds} seconds of your screen in memory, all the time. "
                      "Nothing is saved until you ask for it, so it costs you nothing to leave it on."},
             {"key": "clip", "title": "Save the last few seconds",
              "body": "Press your clip key now. Rewind saves what just happened as a video in your clips folder.",
@@ -64,7 +65,7 @@ class Tutorial(QWidget):
         v.setContentsMargins(28, 24, 28, 22)
         v.setSpacing(12)
         self.count = QLabel()
-        self.count.setObjectName("CardTitle")
+        self.count.setObjectName("RowSub")
         self.title = QLabel()
         self.title.setStyleSheet("font-size: 21px; font-weight: 700;")
         self.title.setWordWrap(True)
@@ -118,8 +119,21 @@ class Tutorial(QWidget):
         self.hide()
 
     # ------------------------------------------------------------ flow
+    def _lock_size(self):
+        steady_width(self.next, ["Next", "Done", "Skip this step"])
+        tallest = 0
+        for i in range(len(self.steps)):
+            self.show_step(i)
+            self.card.adjustSize()
+            tallest = max(tallest, self.card.sizeHint().height())
+        self.card.setMinimumHeight(tallest)
+
     def start(self):
         self.done_steps.clear()
+        if not getattr(self, "_locked", False):
+            self.setGeometry(self.parentWidget().rect())
+            self._lock_size()
+            self._locked = True
         self.setGeometry(self.parentWidget().rect())
         self.raise_()
         self.show()
@@ -138,15 +152,11 @@ class Tutorial(QWidget):
     def show_step(self, i):
         self.i = max(0, min(i, len(self.steps) - 1))
         st = self.steps[self.i]
-        self.count.setText(f"{self.i + 1} OF {len(self.steps)}")
+        self.count.setText(f"Step {self.i + 1} of {len(self.steps)}")
         self.title.setText(st["title"])
         self.body.setText(st["body"])
         self.combo.setVisible("combo" in st)
         self.combo.setText(st.get("combo", ""))
-        act = st.get("action")
-        self.action.setVisible(bool(act))
-        if act:
-            self.action.setText(act[0])
         self.back.setVisible(self.i > 0)
         last = self.i == len(self.steps) - 1
         self.next.setText("Done" if last else "Next")
@@ -165,13 +175,22 @@ class Tutorial(QWidget):
             self.status.setText("✓  " + st["ok"])
             self.status.setStyleSheet(f"color: {theme.GREEN}; font-weight: 600;")
         elif key == "clip" and self.ctrl.recorder.state != "on":
-            self.status.setText("Instant Replay is off. Turn it on with the switch on Home first.")
+            self.status.setText("Instant Replay is off. Turn it on first.")
             self.status.setStyleSheet(f"color: {theme.WARN};")
         else:
             self.status.setText(st.get("wait", "") if waiting else "")
             self.status.setStyleSheet("")
+        replay_off = self.ctrl.recorder.state not in ("on", "starting") and self.ctrl.recorder.mode != "recording"
+        if key == "welcome":
+            self.title.setText("Turn on Instant Replay" if replay_off else st["title"])
+        act = ("Turn on Instant Replay", lambda: self.ctrl.set_replay(True)) if replay_off and key in ("welcome", "clip") \
+            else st.get("action")
+        self._act = act
+        self.action.setVisible(bool(act))
+        if act:
+            self.action.setText(act[0])
         self.next.setText(("Done" if self.i == len(self.steps) - 1 else "Next") if not waiting else "Skip this step")
-        self.next.setObjectName("" if waiting else "Primary")
+        self.next.setProperty("quiet", "true" if waiting else "false")
         self.next.style().unpolish(self.next)
         self.next.style().polish(self.next)
 
@@ -191,7 +210,7 @@ class Tutorial(QWidget):
             self._perm_timer.stop()
 
     def _run_action(self):
-        act = self.steps[self.i].get("action")
+        act = getattr(self, "_act", None)
         if act:
             act[1]()
 

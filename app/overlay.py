@@ -102,12 +102,12 @@ class Overlay(QWidget):
         if self.state == "on":
             return theme.ACCENT, "rewind", "REWIND", f"ON  ·  {self.s.clip_seconds}s"
         if self.state == "recording":
-            return theme.GREEN, "rewind", "RECORDING", "SCREEN CAPTURE ON"
+            return theme.GREEN, "rewind", "RECORDING", "Screen capture on"
         if self.state == "saving":
             return theme.ACCENT, "spinner", "REWIND", "Saving recording…"
         if self.state == "starting":
             return "#777777", "spinner", "REWIND", "Starting…"
-        return "#555555", "rewind", "REWIND", "OFF"
+        return "#555555", "rewind", "REWIND", "Off"
 
     def _fonts(self):
         k = self.k
@@ -268,7 +268,7 @@ class Overlay(QWidget):
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(0, 0, 0, a))
             p.drawRoundedRect(rect.adjusted(-i * 0.5, -i * 0.3, i * 0.5, i * 0.7), ph / 2 + i, ph / 2 + i)
-        p.setBrush(QColor(15, 16, 30, 238))
+        p.setBrush(QColor(22, 22, 22, 238))
         p.setPen(QPen(QColor(255, 255, 255, 26), 1))
         p.drawRoundedRect(rect, ph / 2, ph / 2)
 
