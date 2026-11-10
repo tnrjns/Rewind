@@ -125,6 +125,7 @@ class Settings:
     start_minimized: bool = False
     launch_at_startup: bool = False
     tray_notice_shown: bool = False
+    tutorial_done: bool = False
 
     # ------------------------------------------------------------------
     _lock = threading.Lock()

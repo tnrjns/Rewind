@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpaci
 
 from . import sounds, theme, winapi
 from .recorder import ENCODERS, PERMISSION_NOTE
+from .tutorial import Tutorial
 from .settings import APP_VERSION, IS_MAC, data_dir
 from .widgets import (Card, ChipGroup, ClipCard, HotkeyEdit, LiveDot, SliderControl, ToggleSwitch, make_combo,
                       rounded_pixmap, set_combo)
@@ -902,6 +903,10 @@ class GeneralPage(Page):
             sc.clicked.connect(self._make_shortcut)
             self.sc_row = c2.add_row("Desktop shortcut",
                                      "Adds Rewind to your Desktop and Start menu", sc)
+        tut = QPushButton("Show tutorial")
+        tut.setCursor(Qt.PointingHandCursor)
+        tut.clicked.connect(lambda: ctrl.window.show_tutorial())
+        c2.add_row("Tutorial", "A one-minute walkthrough of the basics", tut)
         quit_btn = QPushButton("Quit Rewind")
         quit_btn.clicked.connect(ctrl.quit)
         c2.add_row("Close completely", "Closing the window keeps Rewind running in the " +
@@ -1001,7 +1006,9 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(p)
         self.nav[0].setChecked(True)
         self._page_anim = None
+        self.tutorial = Tutorial(self, ctrl)
         ctrl.state_changed.connect(self._on_state)
+        ctrl.state_changed.connect(lambda _st: self.tutorial.isVisible() and self.tutorial._refresh_status())
         self._on_state(ctrl.recorder.state)
 
     def _on_state(self, st):
@@ -1043,11 +1050,19 @@ class MainWindow(QMainWindow):
         super().showEvent(e)
         winapi.style_titlebar(int(self.winId()), (0x11, 0x11, 0x11))
         QTimer.singleShot(0, lambda: self.indicator.setGeometry(self._indicator_rect(self.stack.currentIndex())))
+        if not self.ctrl.settings.tutorial_done and not self.tutorial.isVisible():
+            QTimer.singleShot(350, self.show_tutorial)
+
+    def show_tutorial(self):
+        self.go(0)
+        self.tutorial.start()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self._ind_anim.state() != QPropertyAnimation.Running:
             self.indicator.setGeometry(self._indicator_rect(self.stack.currentIndex()))
+        if self.tutorial.isVisible():
+            self.tutorial.setGeometry(self.centralWidget().rect())
 
     def closeEvent(self, e):
         e.ignore()
