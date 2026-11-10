@@ -47,7 +47,7 @@ def draw_rewind_glyph(p: QPainter, cx: float, cy: float, size: float, color=Qt.w
     p.setBrush(QColor(color))
     h = size
     w = size * 0.62
-    x0 = cx - w + w * 0.08
+    x0 = cx - w + w * 0.08 - w * 0.14  # nudged left: the wide ends of the triangles make them look off-centre
     for dx in (0, w * 0.92):
         path = QPainterPath()
         path.moveTo(x0 + dx, cy)
