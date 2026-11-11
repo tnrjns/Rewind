@@ -102,12 +102,14 @@ impl ClipsPage {
     /// Re-list the folder and keep the selection to files that still exist.
     pub fn refresh(&mut self, controller: &Controller) {
         let entries = controller.list_clips(400);
-        let alive: HashSet<PathBuf> = entries.iter().map(|e| e.path.clone()).collect();
-        self.selected.retain(|p| alive.contains(p));
         self.visible = entries
             .into_iter()
             .filter(|e| self.filter.allows(e.kind))
             .collect();
+        // Only what is on screen can be acted on: otherwise selecting a screenshot,
+        // switching to Clips and right-clicking a clip would delete the screenshot too.
+        let shown: HashSet<PathBuf> = self.visible.iter().map(|e| e.path.clone()).collect();
+        self.selected.retain(|p| shown.contains(p));
         self.last_refresh = Instant::now();
     }
 
@@ -345,7 +347,7 @@ impl ClipsPage {
         }
         let path = self.visible[index].path.clone();
         if range {
-            if let Some(anchor) = self.anchor {
+            if let Some(anchor) = self.anchor.filter(|a| *a < self.visible.len()) {
                 let (from, to) = if anchor <= index {
                     (anchor, index)
                 } else {
