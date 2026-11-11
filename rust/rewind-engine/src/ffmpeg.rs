@@ -625,12 +625,23 @@ mod tests {
 
     #[test]
     fn timeout_reports_124() {
-        let out = run(
-            "/bin/sh",
-            &["-c".into(), "sleep 30".into()],
-            Duration::from_millis(120),
-            None,
+        // A process that outlives the timeout must be killed and reported as 124, the
+        // same code the Python helper used. Needs a command that exists on every
+        // platform the engine builds for, so it sleeps using the shell each OS has.
+        #[cfg(target_os = "windows")]
+        let (program, args) = (
+            "cmd",
+            vec!["/C".to_string(), "ping -n 30 127.0.0.1 > nul".to_string()],
         );
-        assert_eq!(out.status, 124);
+        #[cfg(not(target_os = "windows"))]
+        let (program, args) = ("/bin/sh", vec!["-c".to_string(), "sleep 30".to_string()]);
+
+        let started = std::time::Instant::now();
+        let out = run(program, &args, Duration::from_millis(400), None);
+        assert_eq!(out.status, 124, "stderr: {}", out.stderr_lossy());
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the child was not killed at the deadline"
+        );
     }
 }
