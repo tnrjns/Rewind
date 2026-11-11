@@ -207,6 +207,8 @@ struct RewindApp {
     tray: Option<crate::tray_ui::Tray>,
     last_tray_state: TrayState,
     indicator: RailIndicator,
+    /// Set at launch when Instant Replay should start, once the status pill exists.
+    autostart_due: Option<Instant>,
     restart_due: Option<Instant>,
     quitting: bool,
 }
@@ -220,9 +222,12 @@ impl RewindApp {
             clips.notice(message.clone());
             home.notice(message.clone());
         }
-        if controller.settings().start_replay_on_launch {
-            controller.recorder().start();
-        }
+        // Replay starts after the first frame, not here: ScreenCaptureKit fixes its
+        // exclusion list when the stream starts, and the pill window does not exist yet.
+        let autostart_due = controller
+            .settings()
+            .start_replay_on_launch
+            .then(Instant::now);
 
         // Hotkeys arrive on the platform's thread. Waking egui from there is what keeps
         // a press immediate when the window is hidden, which is the normal case: the
@@ -254,6 +259,7 @@ impl RewindApp {
             tray: shell.tray,
             last_tray_state,
             indicator: RailIndicator::new(),
+            autostart_due,
             restart_due: None,
             quitting: false,
         }
@@ -454,6 +460,18 @@ impl eframe::App for RewindApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             } else {
                 self.quit(ctx);
+            }
+        }
+
+        // Start capture once the status pill's window is on screen, so SCK can exclude
+        // it from the very first frame. The timeout covers an overlay that is off.
+        if let Some(started) = self.autostart_due {
+            let pill_up = crate::overlay_window::window_handle_by_title(pill::TITLE).is_some();
+            if pill_up || started.elapsed() > Duration::from_secs(1) {
+                self.autostart_due = None;
+                self.controller.recorder().start();
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(40));
             }
         }
 

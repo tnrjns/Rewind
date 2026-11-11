@@ -30,6 +30,14 @@ concatenates the newest segments with `-c copy` — no re-encode — and muxes i
 last N seconds of audio held in RAM. Full recordings write the same stream to a
 temporary Matroska file and spool audio to disk as raw s16le, muxing to MP4 on stop.
 
+On macOS the screen input is ScreenCaptureKit rather than FFmpeg's `avfoundation`: SCK is
+the only path that can exclude the Rewind status pill from the frame, through an
+`SCContentFilter` that omits the window titled "Rewind status". The capture module hands
+FFmpeg tightly packed NV12 frames at the configured rate, repeating the last frame while
+the screen is static so the stream stays CFR and audio does not drift. `avfoundation`
+remains the fallback: if SCK cannot start, capture proceeds with it, and the pill may then
+appear in clips.
+
 `SEGMENT_WRAP` (75) must stay above the 60 s maximum clip plus headroom; below that a
 long clip silently loses its oldest second.
 

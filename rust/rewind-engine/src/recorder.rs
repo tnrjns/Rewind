@@ -140,6 +140,9 @@ struct Core {
     state: State,
     mode: Mode,
     proc: Option<Child>,
+    /// The ScreenCaptureKit source feeding `proc`'s stdin, when that path is in use.
+    #[cfg(target_os = "macos")]
+    sck: Option<crate::sck::Capture>,
     pipeline: String,
     active_encoder: String,
     started_at: Option<Instant>,
@@ -157,6 +160,24 @@ struct Core {
     revives: Vec<Instant>,
     /// Set while a clip is being muxed; a recording start must wait for it.
     saving: Arc<AtomicBool>,
+}
+
+/// The in-process frame source feeding FFmpeg's stdin, when one is used.
+#[cfg(target_os = "macos")]
+type FrameSource = Option<crate::sck::Capture>;
+#[cfg(not(target_os = "macos"))]
+type FrameSource = ();
+
+#[cfg(not(target_os = "macos"))]
+fn no_frame_source() -> FrameSource {}
+
+#[cfg(target_os = "macos")]
+fn has_frame_source(source: &FrameSource) -> bool {
+    source.is_some()
+}
+#[cfg(not(target_os = "macos"))]
+fn has_frame_source(_source: &FrameSource) -> bool {
+    false
 }
 
 /// Paths and flags that never change for the life of a recorder.
@@ -215,6 +236,8 @@ impl Recorder {
             state: State::Off,
             mode: Mode::Off,
             proc: None,
+            #[cfg(target_os = "macos")]
+            sck: None,
             pipeline: String::new(),
             active_encoder: String::new(),
             started_at: None,
@@ -761,8 +784,7 @@ impl Worker {
             encoder,
             &ffmpeg,
             self.env.test_source,
-            &self.env.buf_dir,
-            record_video.as_deref(),
+            true,
         );
 
         // Audio devices are slow to open — a CoreAudio process tap takes over a second —
@@ -773,8 +795,8 @@ impl Worker {
         let mut launched = None;
         for attempt in attempts {
             match self.launch(&attempt, record_video.as_deref(), &settings) {
-                Ok(proc) => {
-                    launched = Some((proc, attempt));
+                Ok((proc, source)) => {
+                    launched = Some((proc, source, attempt));
                     break;
                 }
                 Err(reason) => {
@@ -789,7 +811,7 @@ impl Worker {
             }
         }
 
-        let Some((proc, attempt)) = launched else {
+        let Some((proc, _source, attempt)) = launched else {
             {
                 let mut core = self.lock();
                 core.mode = Mode::Off;
@@ -808,6 +830,12 @@ impl Worker {
         write_pid(&self.env.pid_path, proc.id());
         {
             let mut core = self.lock();
+            #[cfg(target_os = "macos")]
+            if let Some(source) = _source {
+                if let Some(old) = core.sck.replace(source) {
+                    old.stop();
+                }
+            }
             core.proc = Some(proc);
             core.active_encoder = attempt.encoder.key().to_string();
             core.pipeline = format!(
@@ -980,12 +1008,34 @@ impl Worker {
 
     fn stop_capture(&mut self, emit: bool) {
         let previous_mode = self.lock().mode;
-        let proc = { self.lock().proc.take() };
+        let (proc, source) = {
+            let mut core = self.lock();
+            (core.proc.take(), {
+                #[cfg(target_os = "macos")]
+                {
+                    core.sck.take()
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    no_frame_source()
+                }
+            })
+        };
+        let pumped = has_frame_source(&source);
+        if pumped {
+            // Closing the frame pipe is the clean stop: FFmpeg sees EOF and flushes.
+            #[cfg(target_os = "macos")]
+            if let Some(capture) = source {
+                capture.stop();
+            }
+        }
         if let Some(mut proc) = proc {
             // FFmpeg's segmenter and muxers finalise on a clean `q`; kill only if it hangs.
-            if let Some(stdin) = proc.stdin.as_mut() {
-                let _ = stdin.write_all(b"q");
-                let _ = stdin.flush();
+            if !pumped {
+                if let Some(stdin) = proc.stdin.as_mut() {
+                    let _ = stdin.write_all(b"q");
+                    let _ = stdin.flush();
+                }
             }
             if wait_with_timeout(&mut proc, Duration::from_secs(4)).is_none() {
                 let _ = proc.kill();
@@ -1017,7 +1067,7 @@ impl Worker {
         attempt: &Attempt,
         record_video: Option<&Path>,
         settings: &Settings,
-    ) -> Result<Child, String> {
+    ) -> Result<(Child, FrameSource), String> {
         let ffmpeg = self
             .lock()
             .ffmpeg
@@ -1083,6 +1133,15 @@ impl Worker {
             .stderr(Stdio::from(log.try_clone().map_err(|e| e.to_string())?));
         configure_child(&mut cmd);
         let mut proc = cmd.spawn().map_err(|e| e.to_string())?;
+        #[allow(unused_mut)]
+        let mut source = match self.start_source(attempt, &mut proc, settings) {
+            Ok(source) => source,
+            Err(reason) => {
+                let _ = proc.kill();
+                let _ = proc.wait();
+                return Err(reason);
+            }
+        };
 
         // Wait for real output: a capture that can open the screen still fails later.
         let timeout = if cfg!(target_os = "macos") {
@@ -1104,15 +1163,69 @@ impl Worker {
             };
             if produced {
                 let _ = writeln!(log, "started {}", attempt.name);
-                return Ok(proc);
+                return Ok((proc, source));
             }
             if Instant::now() >= deadline {
+                #[cfg(target_os = "macos")]
+                if let Some(capture) = source.take() {
+                    capture.stop();
+                }
                 let _ = proc.kill();
                 let _ = proc.wait();
                 return Err("produced no output".into());
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+    }
+
+    /// Feed a stdin-based capture from ScreenCaptureKit, or a no-op for other attempts.
+    #[cfg(target_os = "macos")]
+    fn start_source(
+        &self,
+        attempt: &Attempt,
+        proc: &mut Child,
+        settings: &Settings,
+    ) -> Result<FrameSource, String> {
+        if !attempt.needs_stdin() {
+            return Ok(None);
+        }
+        let stdin = proc
+            .stdin
+            .take()
+            .ok_or_else(|| "capture pipe unavailable".to_string())?;
+        let (monitors, cursor) = {
+            let core = self.lock();
+            (core.monitors.clone(), core.settings.capture_cursor)
+        };
+        let index = clamp_monitor(settings.monitor, &monitors);
+        let monitor = monitors
+            .get(index)
+            .ok_or_else(|| "no monitor to capture".to_string())?;
+        // The monitor list stores the CGDirectDisplayID in `device` on macOS.
+        let display = monitor
+            .device
+            .parse::<u32>()
+            .map_err(|_| "monitor has no display id".to_string())?;
+        crate::sck::Capture::start(
+            Box::new(stdin),
+            display,
+            monitor.w,
+            monitor.h,
+            settings.fps.max(1),
+            cursor,
+            Some(crate::sck::EXCLUDED_WINDOW.to_string()),
+        )
+        .map(Some)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn start_source(
+        &self,
+        _attempt: &Attempt,
+        _proc: &mut Child,
+        _settings: &Settings,
+    ) -> Result<FrameSource, String> {
+        Ok(())
     }
 
     // ------------------------------------------------------------ recording finish
@@ -1377,6 +1490,12 @@ pub struct Attempt {
 }
 
 impl Attempt {
+    /// True when this capture comes from inside the process and is fed through stdin.
+    #[cfg(target_os = "macos")]
+    fn needs_stdin(&self) -> bool {
+        self.input.last().is_some_and(|arg| arg == "-")
+    }
+
     /// Full FFmpeg argument list for capturing into `output`.
     ///
     /// Shared with the diagnostic so what it tests is exactly what the recorder runs,
@@ -1418,15 +1537,7 @@ pub fn capture_plan(
     ffmpeg: &Path,
     test_source: bool,
 ) -> Vec<Attempt> {
-    build_attempts(
-        settings,
-        monitors,
-        encoder,
-        ffmpeg,
-        test_source,
-        Path::new("."),
-        None,
-    )
+    build_attempts(settings, monitors, encoder, ffmpeg, test_source, false)
 }
 
 /// The fallback ladder: hardware encoder first, then the same source on CPU, then a
@@ -1437,8 +1548,7 @@ fn build_attempts(
     encoder: EncoderKind,
     ffmpeg: &Path,
     test_source: bool,
-    _buf_dir: &Path,
-    _record_video: Option<&Path>,
+    allow_stdin: bool,
 ) -> Vec<Attempt> {
     let fps = settings.fps.max(1);
     let cursor = if settings.capture_cursor { "1" } else { "0" };
@@ -1493,6 +1603,37 @@ fn build_attempts(
     };
 
     if cfg!(target_os = "macos") {
+        let mut attempts = Vec::new();
+        if allow_stdin {
+            // ScreenCaptureKit is the only macOS path that can exclude the status pill
+            // from recordings. Frames arrive on stdin as tightly packed NV12.
+            let input = vec![
+                "-f".into(),
+                "rawvideo".into(),
+                "-pix_fmt".into(),
+                "nv12".into(),
+                "-s".into(),
+                format!("{}x{}", monitor.w, monitor.h),
+                "-framerate".into(),
+                fps.to_string(),
+                "-i".into(),
+                "-".into(),
+            ];
+            let mut filters = vec![
+                "-fps_mode".into(),
+                "cfr".into(),
+                "-r".into(),
+                fps.to_string(),
+            ];
+            filters.extend(["-vf".into(), format!("{filter_tail},format={pix}")]);
+            attempts.push(Attempt {
+                name: "screencapturekit".into(),
+                input,
+                filters,
+                encoder,
+                size: size.clone(),
+            });
+        }
         let input = vec![
             "-f".into(),
             "avfoundation".into(),
@@ -1511,7 +1652,7 @@ fn build_attempts(
             "-r".into(),
             fps.to_string(),
         ];
-        let mut attempts = vec![Attempt {
+        attempts.push(Attempt {
             name: "avfoundation".into(),
             input: input.clone(),
             filters: {
@@ -1521,7 +1662,7 @@ fn build_attempts(
             },
             encoder,
             size: size.clone(),
-        }];
+        });
         if encoder != EncoderKind::X264 {
             attempts.push(Attempt {
                 name: "avfoundation-cpu".into(),
@@ -2043,6 +2184,36 @@ mod plan_tests {
         assert!(joined.contains("lavfi"), "{joined}");
         assert!(joined.contains("testsrc2"), "{joined}");
         assert_eq!(plan[0].encoder, EncoderKind::X264);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_recorder_prefers_a_piped_screencapturekit_source() {
+        let settings = settings();
+        let plan = build_attempts(
+            &settings,
+            &monitors(),
+            EncoderKind::VideoToolbox,
+            Path::new("/usr/bin/ffmpeg"),
+            false,
+            true,
+        );
+        let first = plan.first().expect("a plan on every platform");
+        assert_eq!(first.name, "screencapturekit");
+        assert!(first.needs_stdin());
+        assert_eq!(first.input.last().map(String::as_str), Some("-"));
+        assert!(first.input.iter().any(|arg| arg == "rawvideo"));
+
+        // The diagnostic runs `Attempt::args` itself and cannot feed stdin, so its plan
+        // must never contain a piped attempt — it would hang waiting for frames.
+        let diagnostic = capture_plan(
+            &settings,
+            &monitors(),
+            EncoderKind::VideoToolbox,
+            Path::new("/usr/bin/ffmpeg"),
+            false,
+        );
+        assert!(diagnostic.iter().all(|attempt| !attempt.needs_stdin()));
     }
 
     #[test]

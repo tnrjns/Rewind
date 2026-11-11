@@ -27,6 +27,8 @@ pub mod meta;
 pub mod paths;
 pub mod platform;
 pub mod recorder;
+#[cfg(target_os = "macos")]
+pub mod sck;
 pub mod screenshot;
 pub mod settings;
 pub mod sounds;

@@ -17,7 +17,7 @@ pub struct Monitor {
     pub w: u32,
     pub h: u32,
     pub primary: bool,
-    /// Windows device name (`\\.\DISPLAY1`); empty elsewhere.
+    /// Windows device name (`\\.\DISPLAY1`); on macOS the CGDirectDisplayID.
     pub device: String,
 }
 
@@ -169,7 +169,7 @@ fn platform_monitors() -> Vec<Monitor> {
             w: w.max(2),
             h: h.max(2),
             primary: id == main,
-            device: String::new(),
+            device: id.to_string(),
         });
     }
     // Put the primary display first so `monitor: 0` means "the main screen" there too.
