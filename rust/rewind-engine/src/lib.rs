@@ -29,6 +29,7 @@ pub mod platform;
 pub mod recorder;
 pub mod screenshot;
 pub mod settings;
+pub mod sounds;
 pub mod trim;
 pub mod wav;
 
