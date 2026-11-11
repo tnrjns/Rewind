@@ -153,7 +153,7 @@ Honest limits, because they matter more than a slogan:
 | `rust/rewind-app` | Shell: the window and Clips page, global hotkeys, tray, status pill, and the `rewind` binary |
 | `app/` | The shipping Python app, unchanged until cutover |
 
-Both crates are real: `cargo test --workspace` runs 175 tests on macOS, and CI builds
+Both crates are real: `cargo test --workspace` runs 177 tests on macOS, and CI builds
 and tests them on Windows too, where the macOS-only ones are skipped and a test for the
 tray's message pump is added.
 The window is drawn with [egui](https://github.com/emilk/egui), an immediate-mode Rust
@@ -167,7 +167,7 @@ documents the behaviours that were subtle enough to get wrong once.
 
 ```bash
 cd rust
-cargo test --workspace          # 175 tests, no display needed
+cargo test --workspace          # 177 tests, no display needed
 cargo run -p rewind-engine --release --example capture_diagnostic
 cargo run -p rewind-app --features tray   # the window, tray and hotkeys
 ```
