@@ -14,10 +14,13 @@
   <a href="https://github.com/tnrjns/Rewind/releases/latest"><img src="https://img.shields.io/github/v/release/tnrjns/Rewind?style=flat-square&color=555" alt="Latest release"></a>
   <a href="https://github.com/tnrjns/Rewind/releases"><img src="https://img.shields.io/github/downloads/tnrjns/Rewind/total?style=flat-square&color=555" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011%20%7C%20macOS%2013%2B-555?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/core-Rust%20in%20progress-B7410E?style=flat-square" alt="Core: Rust in progress">
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-FSL--1.1--ALv2-555?style=flat-square" alt="License"></a>
 </p>
 
 Rewind always keeps the last 15–60 seconds of your screen in a buffer. Press a hotkey and those seconds are saved as a clip, with a sound to confirm. It runs on Windows 11 and macOS 13 or newer on Apple Silicon. Linux is coming.
+
+> **Rewind is being rewritten in Rust.** The capture engine and desktop shell are being ported crate by crate for a smaller, faster app with no Python runtime or Qt stack. The releases below are still the Python build; see [Rewriting the core in Rust](#rewriting-the-core-in-rust) for what is done and what is not.
 
 ## How it's different from OBS
 OBS Studio is built for streaming and long recordings: scenes, sources, filters and plugins. Rewind does one thing. It keeps the last 15–60 seconds of your screen ready, and one key turns them into a clip.
@@ -34,6 +37,10 @@ OBS Studio is built for streaming and long recordings: scenes, sources, filters 
 | App size | 74 MB | 487 MB |
 
 Both kept a 30 second replay buffer of a 1080p, 60 fps screen with Apple's hardware H.264 encoder at 6 Mbps, on an Apple M6 Mac running macOS 27. Rewind recorded desktop audio; OBS used a single screen capture source. CPU and memory are averaged over 30 seconds and count every process each app runs.
+
+These are **Rewind against OBS**, both in Python-era builds — not Python against Rust.
+The Rust port's figures will be published when it ships (see [Rewriting the core in
+Rust](#rewriting-the-core-in-rust)).
 
 If you stream, or need scenes and overlays, use OBS. If you just want to catch the moment that already happened, use Rewind.
 
@@ -71,6 +78,10 @@ mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
 ```
 `bin/rewind-audio` is a small ScreenCaptureKit helper that records the Mac's own sound. Build `Rewind.dmg` with `./build_macos.sh`.
 
+Both of these build the **Python** app, which is what the releases contain. To run the
+Rust capture engine and shell instead, see [Rewriting the core in
+Rust](#rewriting-the-core-in-rust).
+
 ## Features
 - **Clip length:** 15–60 seconds, in 5-second steps (slider or quick chips)
 - **Bitrate:** 5–150 Mbps (slider or presets), with an estimate of the file size
@@ -88,6 +99,77 @@ mkdir -p bin && swiftc -O macos/rewind-audio.swift -o bin/rewind-audio
 - **Tray / menu bar icon:** closing the window keeps Rewind running in the background. It can also start when you log in.
 
 Clips and screenshots are saved to `Videos\Rewind` on Windows and `Movies/Rewind` on macOS. You can change the folder on the Replay page.
+
+## Rewriting the core in Rust
+
+Rewind is moving from Python to Rust. The capture engine and the desktop shell are
+being ported crate by crate, and the two halves will ship together once the shell
+reaches feature parity. Until then, the Python app is what the releases contain.
+
+### Why
+
+The recorder spends its life in a loop that must never miss a frame: read a capture
+buffer, hand it to the encoder, and keep one second ahead of a hotkey. In Python that
+loop runs alongside a GIL, a Qt event loop, and `subprocess` pipes to FFmpeg, with audio
+arriving on library callback threads that have to be handed back to Python. Changing a
+setting restarts that whole arrangement. It works, and it ships — but it carries a
+Python runtime and a Qt stack to do it.
+
+Rust changes the shape of the problem rather than the encoder. FFmpeg still does the
+capture and the encoding — the same NVENC / AMF / Quick Sync / VideoToolbox calls, the
+same bitrates — so capture cost is unchanged. What changes is everything around it:
+
+- **No interpreter, no GIL.** The capture loop is a thread with no lock on the hot path.
+- **A single small binary** instead of a Python runtime, a Qt stack and a frozen
+  interpreter. The app no longer ships Qt at all.
+- **Threads instead of callbacks into an interpreter.** Audio arrives on CoreAudio or
+  WASAPI callbacks and goes straight into a ring buffer with no interpreter in the way.
+- **Capture and audio start concurrently**, so a recording begins in about two seconds
+  instead of waiting for the two to open in turn.
+- **Saving a clip is still a stream copy.** It was a stream copy before too; what
+  changed is that the duration, the audio alignment and the fallback paths are now
+  covered by tests that run against real FFmpeg.
+
+### What that does and does not mean
+
+Honest limits, because they matter more than a slogan:
+
+- **Capture performance is FFmpeg's, not the language's.** If the encoder is the
+  bottleneck, the language does not help.
+- **No measured before/after numbers yet.** The CPU, memory and size figures above are
+  Rewind 1.1.0 against OBS, not Python against Rust. Publishing a Python-vs-Rust table
+  before the shell is finished would be measuring a half-built app, so there isn't one.
+  It will be published with the release that switches the default.
+- **Behaviour is being kept identical**, including the awkward parts: macOS refusing
+  Option/Shift-only hotkeys, loopback devices delivering nothing while the desktop is
+  quiet, clips cutting on one-second keyframes. `settings.json`, `clips.json` and the
+  clips folder are byte-compatible, so upgrading keeps your settings and your library.
+
+### Where it lives
+
+| Path | What it is |
+|---|---|
+| `rust/rewind-engine` | Capture: replay ring buffer, clips, recordings, screenshots, trim |
+| `rust/rewind-app` | Shell: global hotkeys, tray, status pill, and the `rewind` binary |
+| `app/` | The shipping Python app, unchanged until cutover |
+
+Both crates are real: `cargo test --workspace` runs 135 tests, and CI builds and tests
+them on Windows and macOS alongside the Python suite. `rust/rewind-engine/README.md`
+covers the design and the platform details; each crate documents the behaviours that
+were subtle enough to get wrong once.
+
+### Checking it yourself
+
+```bash
+cd rust
+cargo test --workspace          # 135 tests, no display needed
+cargo run -p rewind-engine --release --example capture_diagnostic
+```
+
+The diagnostic tries every capture path on your machine and prints FFmpeg's own reason
+for any that fail. If you find a machine where the Rust build misbehaves, that output is
+the most useful thing you can send.
+
 
 ## Make a standalone .exe (optional)
 Run `build_exe.bat`. It creates `dist\Rewind\Rewind.exe`, which runs without Python. Keep everything in that folder together.
