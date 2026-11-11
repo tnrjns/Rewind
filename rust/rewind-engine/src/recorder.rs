@@ -1215,7 +1215,7 @@ impl Worker {
         cleanup_recording(&video, &tracks);
         self.reset_recording();
         let _ = update_meta(
-            &crate::paths::file_key(&out),
+            &crate::paths::meta_key(&out),
             &[(
                 "duration",
                 serde_json::json!((duration * 100.0).round() / 100.0),
@@ -1817,7 +1817,7 @@ impl ClipJob {
         }
 
         let _ = update_meta(
-            &crate::paths::file_key(&out),
+            &crate::paths::meta_key(&out),
             &[(
                 "duration",
                 serde_json::json!((duration * 100.0).round() / 100.0),

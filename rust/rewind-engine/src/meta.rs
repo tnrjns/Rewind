@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::ffmpeg::run;
-use crate::paths::{data_dir, file_key, sub_dir, thumb_path, write_atomic};
+use crate::paths::{data_dir, meta_key as path_meta_key, sub_dir, thumb_path, write_atomic};
 
 /// Serialises read-modify-write cycles so two clips finishing at once cannot lose an entry.
 static META_LOCK: Mutex<()> = Mutex::new(());
@@ -68,6 +68,33 @@ fn write_meta_unlocked(meta: &Meta) -> std::io::Result<()> {
     write_atomic(&meta_path(), &serde_json::to_vec(&value)?)
 }
 
+/// Carry a clip's metadata over to a new name after the file was renamed.
+///
+/// Clips are keyed by file stem in `clips.json`, and the thumbnail folder uses the same
+/// key, so a rename that skipped this would orphan the duration and leave a row behind.
+/// Returns whether an entry existed to move.
+pub fn rename_entry(old: &str, new: &str) -> std::io::Result<bool> {
+    let _guard = meta_lock();
+    let mut meta = load_meta_unlocked();
+    let moved = move_entry(&mut meta, old, new);
+    if moved {
+        write_meta_unlocked(&meta)?;
+    }
+    Ok(moved)
+}
+
+/// The in-memory half of [`rename_entry`], so the rule is testable without a data dir.
+fn move_entry(meta: &mut Meta, old: &str, new: &str) -> bool {
+    if old == new {
+        return meta.contains_key(new);
+    }
+    let Some(entry) = meta.remove(old) else {
+        return false;
+    };
+    meta.insert(new.to_string(), entry);
+    true
+}
+
 /// Duration recorded for a clip, if any.
 pub fn meta_duration(name: &str) -> Option<f64> {
     load_meta().get(name)?.get("duration")?.as_f64()
@@ -117,6 +144,38 @@ fn file_has_bytes(path: &Path) -> bool {
     fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
 }
 
+/// Write one frame of `video`, `at` seconds in, to `out` as a PNG.
+///
+/// This is what the trim dialog's start and end previews are drawn from. Seeking before
+/// the input (`-ss` ahead of `-i`) keeps it cheap: FFmpeg jumps to the nearest keyframe
+/// instead of decoding the clip from the beginning.
+pub fn frame_at(ffmpeg: &Path, video: &Path, at: f64, out: &Path) -> bool {
+    if let Some(parent) = out.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let result = run(
+        ffmpeg,
+        &[
+            "-hide_banner".into(),
+            "-loglevel".into(),
+            "error".into(),
+            "-y".into(),
+            "-ss".into(),
+            format!("{:.2}", at.max(0.0)),
+            "-i".into(),
+            video.to_string_lossy().into_owned(),
+            "-frames:v".into(),
+            "1".into(),
+            "-vf".into(),
+            "scale=480:-2".into(),
+            out.to_string_lossy().into_owned(),
+        ],
+        Duration::from_secs(30),
+        None,
+    );
+    result.ok() && file_has_bytes(out)
+}
+
 /// Thumbnail path for a clip, whether or not it has been generated yet.
 pub fn thumbnail_for(video: &Path) -> PathBuf {
     thumb_path(video)
@@ -127,14 +186,14 @@ pub fn thumbs_dir() -> PathBuf {
     sub_dir("thumbs")
 }
 
-/// The clips.json key for a path (file stem), exposed for callers writing metadata.
+/// The `clips.json` key for a path, exposed for callers writing metadata.
 pub fn meta_key(video: &Path) -> String {
-    file_key(video)
+    path_meta_key(video)
 }
 
 /// Parse a duration field the way `clips.json` stores it.
 pub fn duration_of(meta: &Meta, video: &Path) -> Option<f64> {
-    meta.get(&file_key(video))
+    meta.get(&path_meta_key(video))
         .and_then(|e| e.get("duration"))
         .and_then(|v| v.as_f64())
 }
@@ -150,7 +209,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         // Exercise the pure serialisation path rather than the real data dir.
         let mut meta = Meta::new();
-        meta.entry("Rewind_2026-01-01_00-00-00".into())
+        meta.entry("Rewind_2026-01-01_00-00-00.mp4".into())
             .or_default()
             .insert("duration".into(), serde_json::json!(12.34));
         let value = Value::Object(
@@ -169,7 +228,7 @@ mod tests {
                 .collect(),
             _ => panic!("object"),
         };
-        assert_eq!(back["Rewind_2026-01-01_00-00-00"]["duration"], 12.34);
+        assert_eq!(back["Rewind_2026-01-01_00-00-00.mp4"]["duration"], 12.34);
         assert_eq!(
             duration_of(&back, Path::new("/clips/Rewind_2026-01-01_00-00-00.mp4")),
             Some(12.34)
@@ -181,6 +240,42 @@ mod tests {
     fn duration_of_missing_entry_is_none() {
         let meta = Meta::new();
         assert_eq!(duration_of(&meta, Path::new("/clips/nope.mp4")), None);
+    }
+
+    #[test]
+    fn metadata_is_keyed_by_file_name_but_thumbnails_by_stem() {
+        // The shipping app writes clips.json under `name.mp4` and thumbs under `name.jpg`.
+        // Both conventions are load-bearing: changing the first hides every duration an
+        // existing install already recorded.
+        let video = Path::new("/clips/Rewind_2026-11-11_09-14-22.mp4");
+        assert_eq!(meta_key(video), "Rewind_2026-11-11_09-14-22.mp4");
+        assert_eq!(crate::paths::file_key(video), "Rewind_2026-11-11_09-14-22");
+    }
+
+    #[test]
+    fn renaming_a_clip_moves_its_metadata_entry() {
+        let mut meta = Meta::new();
+        meta.entry("old".into())
+            .or_default()
+            .insert("duration".into(), serde_json::json!(7.5));
+        assert!(move_entry(&mut meta, "old", "new"));
+        assert!(!meta.contains_key("old"));
+        assert_eq!(meta["new"]["duration"], 7.5);
+    }
+
+    #[test]
+    fn renaming_without_an_entry_moves_nothing() {
+        let mut meta = Meta::new();
+        assert!(!move_entry(&mut meta, "missing", "new"));
+        assert!(meta.is_empty(), "{meta:?}");
+    }
+
+    #[test]
+    fn renaming_to_the_same_name_keeps_the_entry() {
+        let mut meta = Meta::new();
+        meta.entry("same".into()).or_default();
+        assert!(move_entry(&mut meta, "same", "same"));
+        assert!(meta.contains_key("same"));
     }
 
     #[test]
