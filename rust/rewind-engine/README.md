@@ -91,6 +91,16 @@ buffers, spools, log and pid file. Tests use it because they run in parallel, an
 recorders sharing a buffer folder clear each other's segments; the app itself wants
 the default single-profile folder.
 
+## Worth verifying on Windows
+
+`list_monitors` sorts displays by device name (`\\.\DISPLAY1`, `DISPLAY2`, …), the same
+order the Python app used, while macOS puts the primary display first. The capture
+command indexes that list (`ddagrab=output_idx=N`), so on a multi-monitor Windows
+machine the two orderings have to agree for `monitor: 0` to mean the screen the user
+picked. They agree in the usual single-primary layout; they have not been checked
+against a machine with displays arranged unusually. Pick the monitor explicitly in
+settings when in doubt.
+
 ## Not ported
 
 The UI, tray, overlay, hotkeys, sounds, updates and single-instance plumbing stay in
