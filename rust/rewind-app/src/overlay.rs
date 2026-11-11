@@ -187,6 +187,42 @@ pub fn phase(elapsed: Duration) -> f32 {
     (seconds % 0.9) / 0.9
 }
 
+/// How long the pill lingers in "auto" mode, where it only shows when something
+/// happens rather than staying on screen.
+pub const AUTO_HIDE_AFTER: Duration = Duration::from_millis(2600);
+
+/// Whether the pill is on screen at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Shown,
+    /// Shown for now, but should start counting down.
+    ShownTemporarily,
+    Hidden,
+}
+
+/// Decide whether to show the pill.
+///
+/// `enabled` and `always` come from settings: turning the overlay off hides it
+/// entirely; "always" mode keeps it up; the other mode shows it only around activity
+/// and lets it fade, which is what stops it being a permanent distraction.
+pub fn visibility(
+    enabled: bool,
+    always: bool,
+    flashing: bool,
+    caused_by_activity: bool,
+) -> Visibility {
+    if !enabled {
+        return Visibility::Hidden;
+    }
+    if always || flashing {
+        return Visibility::Shown;
+    }
+    if caused_by_activity {
+        return Visibility::ShownTemporarily;
+    }
+    Visibility::Hidden
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +351,38 @@ mod tests {
             phase(Duration::from_millis(300)),
             phase(Duration::from_millis(300))
         );
+    }
+
+    #[test]
+    fn a_disabled_overlay_is_never_shown() {
+        // Even mid-flash: the setting wins.
+        assert_eq!(visibility(false, true, true, true), Visibility::Hidden);
+        assert_eq!(visibility(false, false, false, false), Visibility::Hidden);
+    }
+
+    #[test]
+    fn always_mode_stays_up() {
+        assert_eq!(visibility(true, true, false, false), Visibility::Shown);
+    }
+
+    #[test]
+    fn auto_mode_shows_only_around_activity() {
+        assert_eq!(
+            visibility(true, false, false, true),
+            Visibility::ShownTemporarily
+        );
+        assert_eq!(visibility(true, false, false, false), Visibility::Hidden);
+    }
+
+    #[test]
+    fn a_flash_shows_even_in_auto_mode() {
+        // A saved clip must be confirmed even if the pill is otherwise hidden.
+        assert_eq!(visibility(true, false, true, false), Visibility::Shown);
+    }
+
+    #[test]
+    fn auto_hide_wait_is_long_enough_to_read_a_flash() {
+        assert!(AUTO_HIDE_AFTER >= Flash::Screenshot.duration());
     }
 
     #[test]
