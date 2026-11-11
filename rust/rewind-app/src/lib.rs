@@ -8,6 +8,7 @@
 //! one key saves the last thirty seconds, from inside a game.
 
 pub mod controller;
+pub mod event_loop;
 pub mod hotkeys;
 pub mod overlay;
 pub mod overlay_window;

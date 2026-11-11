@@ -35,8 +35,42 @@ impl Monitor {
     }
 }
 
+/// Report display geometry in the space FFmpeg captures in on Windows.
+///
+/// A DPI-unaware process gets *virtualised* rectangles from `GetMonitorInfoW`: a
+/// 1920×1080 panel scaled to 150% is reported as 1280×720. Capture indexes that
+/// geometry — `gdigrab` takes `-video_size` and `-offset_x`/`-offset_y` from it, and
+/// the resolution setting is compared against its height — so on a scaled desktop the
+/// fallback path would grab a cropped corner at the wrong size. The Python app never
+/// saw this because Qt declares per-monitor awareness before its first window; a Rust
+/// process has to say so itself.
+///
+/// Windows locks awareness when a thread creates its first window, and a later call
+/// fails, so call this before creating any window. Idempotent, and a no-op off Windows.
+pub fn init_process() {
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::Once;
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            use windows::Win32::UI::HiDpi::{
+                SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            };
+            // SAFETY: sets this process's DPI policy and passes no memory. Failure means
+            // the policy was already fixed (a manifest, or an earlier call), which is
+            // equally good.
+            unsafe {
+                let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+        });
+    }
+}
+
 /// Displays available for capture. Never empty: falls back to a 1920×1080 primary.
 pub fn list_monitors() -> Vec<Monitor> {
+    // Best effort for callers that never call it themselves; a process that already
+    // created a window is past this point and keeps the policy it had.
+    init_process();
     let mut monitors = platform_monitors();
     if monitors.is_empty() {
         return vec![Monitor::synthetic(0)];

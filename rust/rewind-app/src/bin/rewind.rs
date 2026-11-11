@@ -29,6 +29,11 @@ fn run() -> Result<(), String> {
     use rewind_app::tray_ui::{poll_menu_events, Tray};
     use rewind_engine::Settings;
 
+    // Before any window exists: Windows locks DPI awareness at that moment, and a
+    // process that misses the window reports scaled monitor geometry for the rest of
+    // its life.
+    rewind_engine::platform::init_process();
+
     let settings = Settings::load();
     let mut controller = Controller::new(settings.clone());
 
@@ -57,6 +62,9 @@ fn run() -> Result<(), String> {
 
     let mut last_state = tray_state;
     loop {
+        // Tray clicks arrive as window messages; nothing else reads that queue.
+        rewind_app::event_loop::pump();
+
         // Hotkey presses.
         while let Ok(action) = press_rx.try_recv() {
             match action.as_str() {
