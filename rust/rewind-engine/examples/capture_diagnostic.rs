@@ -22,6 +22,10 @@ use rewind_engine::{list_monitors, Settings};
 const WARMUP: Duration = Duration::from_secs(8);
 
 fn main() {
+    // Windows reports scaled geometry to a DPI-unaware process; ask for the physical
+    // pixels ddagrab captures before anything reads a monitor.
+    rewind_engine::platform::init_process();
+
     println!("Rewind capture diagnostic on {}", std::env::consts::OS);
     println!("------------------------------------------------");
 

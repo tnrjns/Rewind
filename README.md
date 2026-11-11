@@ -153,16 +153,16 @@ Honest limits, because they matter more than a slogan:
 | `rust/rewind-app` | Shell: global hotkeys, tray, status pill, and the `rewind` binary |
 | `app/` | The shipping Python app, unchanged until cutover |
 
-Both crates are real: `cargo test --workspace` runs 135 tests, and CI builds and tests
-them on Windows and macOS alongside the Python suite. `rust/rewind-engine/README.md`
-covers the design and the platform details; each crate documents the behaviours that
-were subtle enough to get wrong once.
+Both crates are real: `cargo test --workspace` runs 135 tests on macOS and 136 on
+Windows, and CI builds and tests them on both alongside the Python suite.
+`rust/rewind-engine/README.md` covers the design and the platform details; each crate
+documents the behaviours that were subtle enough to get wrong once.
 
 ### Checking it yourself
 
 ```bash
 cd rust
-cargo test --workspace          # 135 tests, no display needed
+cargo test --workspace          # 135 tests (136 on Windows), no display needed
 cargo run -p rewind-engine --release --example capture_diagnostic
 ```
 

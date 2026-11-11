@@ -101,10 +101,19 @@ picked. They agree in the usual single-primary layout; they have not been checke
 against a machine with displays arranged unusually. Pick the monitor explicitly in
 settings when in doubt.
 
+`init_process()` declares per-monitor DPI awareness on Windows. Without it
+`GetMonitorInfoW` virtualises rectangles for a DPI-unaware process — a 1920×1080 panel
+scaled to 150% reports 1280×720 — and the `gdigrab` fallback would take its
+`-video_size` and offsets from those smaller numbers, capturing a cropped corner.
+Windows freezes the policy when a thread creates its first window, so the app binary
+calls `init_process` before the tray icon exists; `list_monitors` calls it too, as a
+best effort for callers that forget. The Python app never had to say this out loud
+because Qt declared awareness at startup.
+
 ## Not ported
 
-The UI, tray, overlay, hotkeys, sounds, updates and single-instance plumbing stay in
-`app/` for now. This crate hands them the same primitives the Python controller used:
+The window and Clips page, sounds, updates and single-instance plumbing stay in `app/`
+for now. This crate hands them the same primitives the Python controller used:
 `Settings`, `Recorder` + `Event`, `take_screenshot`, `trim_clip`, `load_meta`,
 `list_monitors`, `list_microphones`.
 

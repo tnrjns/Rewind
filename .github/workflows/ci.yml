@@ -49,9 +49,8 @@ jobs:
       - if: runner.os == 'Windows'
         run: choco install ffmpeg -y --no-progress
       - run: cargo test
-      # The tray is behind a feature; build it too so it cannot rot unnoticed.
       - run: cargo build --release
-      - if: runner.os == 'macOS'
-        run: cargo clippy --workspace --all-targets --features rewind-app/tray -- -D warnings
-      - if: runner.os == 'macOS'
-        run: cargo build -p rewind-app --features tray
+      # The tray is behind a feature; build and lint it on both platforms so neither
+      # side's window, menu or message-loop code can rot unnoticed.
+      - run: cargo clippy --workspace --all-targets --features rewind-app/tray -- -D warnings
+      - run: cargo build -p rewind-app --features tray
