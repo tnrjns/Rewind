@@ -225,14 +225,18 @@ impl ClipsPage {
                                     double = Some(index);
                                 }
 
-                                let targets = if selected.contains(&entry.path) {
-                                    selected.clone()
-                                } else {
-                                    vec![entry.path.clone()]
-                                };
+                                // Built inside the popup, not per frame: cloning a large
+                                // selection for every visible cell would allocate on
+                                // every repaint for a menu that is rarely open.
+                                let is_selected = selected.contains(&entry.path);
                                 let path = entry.path.clone();
                                 let kind = entry.kind;
                                 response.context_menu(|ui| {
+                                    let targets = if is_selected {
+                                        selected.clone()
+                                    } else {
+                                        vec![path.clone()]
+                                    };
                                     let mut chosen: Option<MenuRequest> = None;
                                     if ui.button("Open").clicked() {
                                         chosen = Some(MenuRequest::Open(path.clone()));
