@@ -7,6 +7,8 @@
 //! Hotkeys are the first slice because they are what makes Rewind feel like Rewind —
 //! one key saves the last thirty seconds, from inside a game.
 
+pub mod controller;
 pub mod hotkeys;
 
+pub use controller::{Action, ClipEntry, ClipKind, Controller, Notice, SettingValue};
 pub use hotkeys::{HotkeyError, HotkeyManager, Registration, HOTKEY_ACTIONS};

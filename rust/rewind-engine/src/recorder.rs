@@ -172,7 +172,9 @@ pub struct Recorder {
     core: Arc<Mutex<Core>>,
     env: Env,
     commands: Sender<Cmd>,
-    events_rx: Receiver<Event>,
+    /// Shared so `Recorder` stays `Sync`: any thread may read events, each event going
+    /// to exactly one reader.
+    events_rx: Arc<Mutex<Receiver<Event>>>,
     events_tx: Sender<Event>,
     saving: Arc<AtomicBool>,
 }
@@ -240,7 +242,7 @@ impl Recorder {
                 test_source,
             },
             commands: commands_tx,
-            events_rx,
+            events_rx: Arc::new(Mutex::new(events_rx)),
             events_tx,
             saving: Arc::clone(&saving_flag),
         };
@@ -315,12 +317,14 @@ impl Recorder {
 
     /// Blocking event read. `None` once every sender is gone.
     pub fn recv(&self) -> Option<Event> {
-        self.events_rx.recv().ok()
+        let rx = self.events_rx.lock().ok()?;
+        rx.recv().ok()
     }
 
     /// Non-blocking event read for UI loops.
     pub fn try_recv(&self) -> Option<Event> {
-        self.events_rx.try_recv().ok()
+        let rx = self.events_rx.lock().ok()?;
+        rx.try_recv().ok()
     }
 
     // ---------------------------------------------------------------- commands
