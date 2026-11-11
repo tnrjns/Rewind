@@ -39,6 +39,8 @@ fn run() -> Result<(), String> {
     };
     #[cfg(not(feature = "tray"))]
     let shell = Shell { hotkeys, startup };
+    // Without the tray there is no icon to build and no state to show.
+    #[cfg(not(feature = "tray"))]
     let _ = (state, logo);
 
     ui::run(controller, shell).map_err(|e| e.to_string())
