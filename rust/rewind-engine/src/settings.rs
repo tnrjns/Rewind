@@ -174,6 +174,13 @@ pub struct Settings {
     pub sound_custom: String,
     pub sound_volume: i32,
     pub toggle_sound: bool,
+
+    /// Status-icon settings. The pill itself is the shell's; these are what it reads.
+    pub overlay_enabled: bool,
+    pub overlay_mode: String,
+    pub overlay_corner: String,
+    pub overlay_scale: i32,
+    pub overlay_opacity: i32,
     /// Keys this build does not model (overlay, hotkey text, tutorial flags…) kept verbatim.
     extra: BTreeMap<String, Value>,
 }
@@ -205,6 +212,11 @@ impl Default for Settings {
             sound_custom: String::new(),
             sound_volume: 70,
             toggle_sound: true,
+            overlay_enabled: true,
+            overlay_mode: "always".into(),
+            overlay_corner: "bottom-right".into(),
+            overlay_scale: 100,
+            overlay_opacity: 92,
             extra: BTreeMap::new(),
         }
     }
@@ -236,6 +248,11 @@ const KNOWN_KEYS: &[&str] = &[
     "sound_custom",
     "sound_volume",
     "toggle_sound",
+    "overlay_enabled",
+    "overlay_mode",
+    "overlay_corner",
+    "overlay_scale",
+    "overlay_opacity",
 ];
 
 impl Settings {
@@ -358,6 +375,27 @@ impl Settings {
             "copy_after_save" => self.copy_after_save = boolean(v).unwrap_or(self.copy_after_save),
             "sound_enabled" => self.sound_enabled = boolean(v).unwrap_or(self.sound_enabled),
             "toggle_sound" => self.toggle_sound = boolean(v).unwrap_or(self.toggle_sound),
+            "overlay_enabled" => self.overlay_enabled = boolean(v).unwrap_or(self.overlay_enabled),
+            "overlay_mode" => {
+                if let Some(t) = text(v) {
+                    self.overlay_mode = if t == "auto" {
+                        "auto".into()
+                    } else {
+                        "always".into()
+                    };
+                }
+            }
+            "overlay_corner" => {
+                if let Some(t) = text(v) {
+                    self.overlay_corner = t;
+                }
+            }
+            "overlay_scale" => {
+                self.overlay_scale = int(v).unwrap_or(self.overlay_scale as i64) as i32
+            }
+            "overlay_opacity" => {
+                self.overlay_opacity = int(v).unwrap_or(self.overlay_opacity as i64) as i32
+            }
             _ => {}
         }
     }
@@ -371,6 +409,18 @@ impl Settings {
         self.system_volume = self.system_volume.clamp(0, 200);
         self.mic_volume = self.mic_volume.clamp(0, 200);
         self.sound_volume = self.sound_volume.clamp(0, 100);
+        // The panels the Python Overlay page offered, and nothing else.
+        self.overlay_scale = self.overlay_scale.clamp(75, 150);
+        self.overlay_opacity = self.overlay_opacity.clamp(30, 100);
+        if self.overlay_mode != "auto" {
+            self.overlay_mode = "always".into();
+        }
+        if !matches!(
+            self.overlay_corner.as_str(),
+            "bottom-left" | "bottom-right" | "top-left" | "top-right"
+        ) {
+            self.overlay_corner = "bottom-right".into();
+        }
         if self.fps == 0 {
             self.fps = 60;
         }
@@ -463,6 +513,11 @@ impl Settings {
         set!("sound_custom", self.sound_custom);
         set!("sound_volume", self.sound_volume);
         set!("toggle_sound", self.toggle_sound);
+        set!("overlay_enabled", self.overlay_enabled);
+        set!("overlay_mode", self.overlay_mode);
+        set!("overlay_corner", self.overlay_corner);
+        set!("overlay_scale", self.overlay_scale);
+        set!("overlay_opacity", self.overlay_opacity);
         Value::Object(map)
     }
 
@@ -559,6 +614,54 @@ mod tests {
         assert_eq!(back.resolution, Resolution::Height(1080));
         assert!(back.mic_enabled);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn overlay_defaults_match_the_python_app() {
+        let s = Settings::default();
+        assert!(s.overlay_enabled);
+        assert_eq!(s.overlay_mode, "always");
+        assert_eq!(s.overlay_corner, "bottom-right");
+        assert_eq!(s.overlay_scale, 100);
+        assert_eq!(s.overlay_opacity, 92);
+    }
+
+    #[test]
+    fn overlay_settings_survive_a_file_round_trip_and_are_not_left_as_unknowns() {
+        let dir = std::env::temp_dir().join(format!("rewind-overlay-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        let s = Settings {
+            overlay_enabled: false,
+            overlay_mode: "auto".into(),
+            overlay_corner: "top-left".into(),
+            overlay_scale: 125,
+            overlay_opacity: 60,
+            ..Settings::default()
+        };
+        s.save_to(&path).unwrap();
+        let raw: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(raw["overlay_mode"], "auto");
+        let back = Settings::load_from(&path).unwrap();
+        assert!(!back.overlay_enabled);
+        assert_eq!(back.overlay_mode, "auto");
+        assert_eq!(back.overlay_corner, "top-left");
+        assert_eq!(back.overlay_scale, 125);
+        assert_eq!(back.overlay_opacity, 60);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn overlay_values_outside_the_panels_are_clamped() {
+        let s = Settings::from_json(
+            br#"{"overlay_scale": 900, "overlay_opacity": 1, "overlay_mode": "sometimes",
+                 "overlay_corner": "middle"}"#,
+        );
+        assert_eq!(s.overlay_scale, 150);
+        assert_eq!(s.overlay_opacity, 30);
+        assert_eq!(s.overlay_mode, "always");
+        assert_eq!(s.overlay_corner, "bottom-right");
     }
 
     #[test]
