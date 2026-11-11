@@ -69,6 +69,11 @@ When testing audio by hand, play something first.
 
 ## Settings compatibility
 
+Tests and side-by-side runs must not write into a real install: `REWIND_DATA_DIR` moves
+the whole data folder (settings, `clips.json`, thumbnails, buffers, logs), and
+`Recorder::with_data_dir` moves one recorder's buffers *and* its metadata and thumbnails.
+Before that, running the suite left clip entries in the user's `clips.json`.
+
 `settings.json`, `clips.json` and the data folders are byte-compatible with the
 Python build, so an existing install keeps its settings, metadata and clips. One detail
 is easy to get wrong and was: `clips.json` is keyed by **file name with extension**

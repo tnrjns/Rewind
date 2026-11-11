@@ -11,6 +11,17 @@ use rewind_app::hotkeys::{HotkeyManager, Registration};
 use rewind_engine::ffmpeg::{find_ffmpeg, probe_duration};
 use rewind_engine::{Event, Settings, State};
 
+/// Keep everything this binary writes out of the real install: settings, clips.json,
+/// thumbnails, buffers and logs all follow `data_dir`.
+fn isolate_data_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::temp_dir().join(format!("rewind-app-it-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("REWIND_DATA_DIR", &dir);
+    });
+}
+
 fn pump(controller: &Controller) -> Vec<Notice> {
     let mut notices = Vec::new();
     while let Some(event) = controller.recorder().try_recv() {
@@ -74,6 +85,7 @@ fn a_clip_hotkey_press_saves_a_clip() {
         return;
     };
     // The engine picks its source from the environment at construction.
+    isolate_data_dir();
     std::env::set_var("REWIND_TEST_SOURCE", "1");
 
     let dir = std::env::temp_dir().join(format!("rewind-hk-clip-{}", std::process::id()));
@@ -137,6 +149,7 @@ fn a_clip_hotkey_press_saves_a_clip() {
 
 #[test]
 fn the_clip_hotkey_reports_why_it_cannot_save() {
+    isolate_data_dir();
     std::env::set_var("REWIND_TEST_SOURCE", "1");
     let dir = std::env::temp_dir().join(format!("rewind-hk-off-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -157,6 +170,7 @@ fn the_clip_hotkey_reports_why_it_cannot_save() {
 
 #[test]
 fn recording_toggle_round_trips_through_the_controller() {
+    isolate_data_dir();
     std::env::set_var("REWIND_TEST_SOURCE", "1");
     let dir = std::env::temp_dir().join(format!("rewind-hk-rec-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

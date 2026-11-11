@@ -14,7 +14,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const APP_NAME: &str = "Rewind";
 
 /// Base folder for settings, logs, buffer and thumbnails.
+///
+/// `REWIND_DATA_DIR` overrides everything: tests and side-by-side runs must never write
+/// into the folder a real install uses, and this is the switch they pull.
 pub fn data_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("REWIND_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
     let base = if cfg!(target_os = "windows") {
         env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
@@ -166,6 +172,11 @@ pub fn meta_key(path: &Path) -> String {
 
 pub fn thumb_path(video: &Path) -> PathBuf {
     sub_dir("thumbs").join(format!("{}.jpg", file_key(video)))
+}
+
+/// Thumbnail path under an explicit data root, for a recorder with its own folders.
+pub fn thumb_path_in(root: &Path, video: &Path) -> PathBuf {
+    root.join("thumbs").join(format!("{}.jpg", file_key(video)))
 }
 
 /// Open a file or folder in the OS file manager.

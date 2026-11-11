@@ -166,6 +166,21 @@ fn clip_is_a_playable_mp4_with_sound() {
         "clip is {:.2} s, longer than the 15 s window plus headroom",
         layout.duration
     );
+
+    // Metadata and the thumbnail belong to this recorder's data folder. They used to go
+    // to the user's real data folder, so running the tests dirtied a real library.
+    let data = dir.join("data");
+    assert!(
+        data.join("clips.json").is_file(),
+        "metadata was not written under the recorder's data root"
+    );
+    assert!(
+        data.join("thumbs")
+            .read_dir()
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false),
+        "the thumbnail was not written under the recorder's data root"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
