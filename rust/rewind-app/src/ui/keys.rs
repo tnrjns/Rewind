@@ -322,6 +322,33 @@ mod tests {
     }
 
     #[test]
+    fn the_shipped_defaults_come_from_this_table() {
+        // The defaults in `settings.rs` were transcribed from the Python app; the table
+        // here was taken from the platform headers. They must agree, or the Hotkeys page
+        // would show one combo and register another.
+        let (toggle, clip, record, shot, open) = rewind_engine::default_hotkeys();
+        #[cfg(target_os = "macos")]
+        let keys = [
+            (egui::Key::I, toggle),
+            (egui::Key::S, clip),
+            (egui::Key::R, record),
+            (egui::Key::P, shot),
+            (egui::Key::Num0, open),
+        ];
+        #[cfg(not(target_os = "macos"))]
+        let keys = [
+            (egui::Key::F9, toggle),
+            (egui::Key::F10, clip),
+            (egui::Key::F11, record),
+            (egui::Key::F12, shot),
+            (egui::Key::Num0, open),
+        ];
+        for (key, hotkey) in keys {
+            assert_eq!(code(key).unwrap().0, hotkey.vk, "{key:?}");
+        }
+    }
+
+    #[test]
     fn each_key_gets_its_own_code() {
         let mut seen = std::collections::HashMap::new();
         for key in [
