@@ -521,6 +521,9 @@ impl eframe::App for RewindApp {
                     }),
             )
             .show(ui, |ui| {
+                // Every gap on a page is explicit, matching the Python layouts' own
+                // spacing. egui would otherwise add its item spacing on top.
+                ui.spacing_mut().item_spacing.y = 0.0;
                 let Self {
                     controller,
                     pages,
@@ -529,12 +532,14 @@ impl eframe::App for RewindApp {
                     ..
                 } = self;
                 let page = &mut pages[*current];
+                let subtitle = page.subtitle();
                 ui.label(RichText::new(page.title()).size(26.0).strong());
-                if let Some(subtitle) = page.subtitle() {
-                    ui.add_space(4.0);
+                if let Some(subtitle) = subtitle {
+                    ui.add_space(16.0);
                     ui.label(RichText::new(subtitle).size(13.0).color(theme::MUTED));
                 }
-                ui.add_space(16.0);
+                // The page's QVBoxLayout spacing, plus its addSpacing(6).
+                ui.add_space(if subtitle.is_some() { 22.0 } else { 18.0 });
                 output = page.ui(ui, controller, hotkeys);
             });
         self.apply_changes(output.changes);

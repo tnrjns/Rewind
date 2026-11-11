@@ -50,13 +50,14 @@ pub fn apply(ctx: &egui::Context) {
             &mut visuals.widgets.open,
         ] {
             state.fg_stroke.color = TEXT;
-            state.corner_radius = CornerRadius::same(8);
+            // The stylesheet's buttons, fields and menus all use a 6 px radius.
+            state.corner_radius = CornerRadius::same(6);
         }
         visuals.widgets.noninteractive.fg_stroke.color = MUTED;
 
         style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-        style.spacing.button_padding = egui::vec2(12.0, 6.0);
-        style.spacing.scroll.bar_width = 8.0;
+        style.spacing.button_padding = egui::vec2(16.0, 8.0);
+        style.spacing.scroll.bar_width = 10.0;
         style
             .text_styles
             .insert(egui::TextStyle::Heading, egui::FontId::proportional(24.0));

@@ -197,17 +197,20 @@ impl HomePage {
                 bottom: 24,
             })
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(
                             RichText::new("INSTANT REPLAY")
                                 .size(11.0)
                                 .strong()
                                 .color(theme::SUBTLE),
                         );
-                        ui.add_space(6.0);
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
                             let (rect, _) =
                                 ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
                             ui.painter().circle_filled(
@@ -224,7 +227,7 @@ impl HomePage {
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new(detail_text(state, mode, pipeline, toggle_hotkey))
-                                .size(11.5)
+                                .size(12.0)
                                 .color(theme::MUTED),
                         );
                     });
@@ -433,9 +436,10 @@ fn encoder_label(controller: &Controller, state: State) -> String {
 
 fn hero_buffer(ui: &mut egui::Ui, recording: bool, buffered: f64, clip_seconds: u32) {
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 12.0;
         ui.label(
             RichText::new(if recording { "Elapsed" } else { "Buffer" })
-                .size(12.0)
+                .size(13.0)
                 .color(theme::MUTED),
         );
         let value = if recording {

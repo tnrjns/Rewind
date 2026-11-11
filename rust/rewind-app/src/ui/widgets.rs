@@ -21,6 +21,7 @@ pub fn card(ui: &mut egui::Ui, title: Option<&str>, add: impl FnOnce(&mut egui::
             bottom: 10,
         })
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(ui.available_width());
             if let Some(title) = title {
                 ui.label(
@@ -57,13 +58,16 @@ pub fn row_with(
             bottom: 12,
         })
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 18.0;
                 ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     ui.set_max_width(text_width);
                     ui.label(RichText::new(title).size(13.5).strong());
                     if let Some(sub) = sub.filter(|text| !text.is_empty()) {
-                        ui.add_space(2.0);
-                        ui.label(RichText::new(sub).size(11.5).color(sub_color));
+                        ui.add_space(3.0);
+                        ui.label(RichText::new(sub).size(12.0).color(sub_color));
                     }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), control);
@@ -80,12 +84,12 @@ pub fn separator(ui: &mut egui::Ui) {
 
 /// A switch, as the Python app draws it: a pill that flips rather than a tick box.
 pub fn switch(ui: &mut egui::Ui, on: &mut bool) -> bool {
-    switch_sized(ui, on, Vec2::new(40.0, 22.0))
+    switch_sized(ui, on, Vec2::new(44.0, 24.0))
 }
 
 /// The same switch at the hero's size.
 pub fn switch_large(ui: &mut egui::Ui, on: &mut bool) -> bool {
-    switch_sized(ui, on, Vec2::new(58.0, 32.0))
+    switch_sized(ui, on, Vec2::new(62.0, 34.0))
 }
 
 fn switch_sized(ui: &mut egui::Ui, on: &mut bool, size: Vec2) -> bool {
@@ -97,22 +101,21 @@ fn switch_sized(ui: &mut egui::Ui, on: &mut bool, size: Vec2) -> bool {
     let t = ui.ctx().animate_bool(response.id, *on);
     let painter = ui.painter();
     let radius = rect.height() / 2.0;
+    // The switch's off track is #4A4A4A, not the card fill, and the knob is white.
+    let off = Color32::from_rgb(0x4A, 0x4A, 0x4A);
     painter.rect_filled(
         rect,
         egui::CornerRadius::same(radius as u8),
-        if *on { theme::ACCENT } else { theme::FIELD },
+        mix(off, theme::ACCENT, t),
     );
     let knob = radius - 3.0;
     let knob_x = rect.left() + radius + (rect.width() - rect.height()) * t;
     painter.circle_filled(
-        egui::pos2(knob_x, rect.center().y),
+        egui::pos2(knob_x, rect.center().y + 1.0),
         knob,
-        if *on {
-            Color32::from_rgb(0x1B, 0x1B, 0x1B)
-        } else {
-            theme::MUTED
-        },
+        Color32::from_black_alpha(40),
     );
+    painter.circle_filled(egui::pos2(knob_x, rect.center().y), knob, Color32::WHITE);
     response.clicked()
 }
 
@@ -148,6 +151,7 @@ pub fn tile(ui: &mut egui::Ui, label: &str, value: &str) {
             bottom: 12,
         })
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(ui.available_width());
             ui.label(RichText::new(label).size(11.0).strong().color(theme::MUTED));
             ui.add_space(3.0);
@@ -157,17 +161,33 @@ pub fn tile(ui: &mut egui::Ui, label: &str, value: &str) {
 
 /// A filter/quick-setting pill.
 pub fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
-    let (fill, text) = if selected {
-        (theme::ACCENT, Color32::BLACK)
+    let (fill, text, border) = if selected {
+        (
+            Color32::from_rgb(0x3A, 0x3A, 0x3A),
+            theme::TEXT,
+            Color32::from_rgb(0x8A, 0x8A, 0x8A),
+        )
     } else {
-        (theme::CARD_2, theme::TEXT)
+        (theme::FIELD, theme::MUTED, theme::BORDER)
     };
     ui.add(
-        egui::Button::new(RichText::new(label).color(text))
+        egui::Button::new(RichText::new(label).size(13.0).color(text))
             .fill(fill)
-            .corner_radius(egui::CornerRadius::same(20)),
+            .stroke(Stroke::new(1.0, border))
+            .corner_radius(egui::CornerRadius::same(15))
+            .min_size(Vec2::new(0.0, 30.0)),
     )
     .clicked()
+}
+
+/// Blend two colours, for the switch's track.
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let channel = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgb(
+        channel(a.r(), b.r()),
+        channel(a.g(), b.g()),
+        channel(a.b(), b.b()),
+    )
 }
 
 /// Shrink text with an ellipsis until it fits `max_width`.
@@ -202,7 +222,7 @@ pub fn combo(ui: &mut egui::Ui, id: &str, labels: &[String], current: usize) -> 
     let mut chosen = None;
     egui::ComboBox::from_id_salt(id)
         .selected_text(labels.get(current).cloned().unwrap_or_default())
-        .width(230.0)
+        .width(216.0)
         .show_ui(ui, |ui| {
             for (index, label) in labels.iter().enumerate() {
                 if ui.selectable_label(index == current, label).clicked() {
@@ -229,12 +249,17 @@ pub fn slider(
     step: i64,
     suffix: &str,
 ) -> SliderEdit {
-    ui.spacing_mut().slider_width = 190.0;
+    ui.spacing_mut().slider_width = 230.0;
     // Row controls sit in a right-to-left layout, so the readout is added before the
     // track: that renders as [track][value], the way the Python app's SliderControl does.
+    ui.spacing_mut().item_spacing.x = 14.0;
     ui.add_sized(
-        [86.0, 18.0],
-        egui::Label::new(egui::RichText::new(format!("{value}{suffix}")).size(12.5)),
+        [78.0, 18.0],
+        egui::Label::new(
+            egui::RichText::new(format!("{value}{suffix}"))
+                .size(13.0)
+                .strong(),
+        ),
     );
     let mut scaled = *value as f64;
     let response = ui.add(
