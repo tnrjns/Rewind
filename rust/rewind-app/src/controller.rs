@@ -464,6 +464,7 @@ pub enum SettingValue {
     Bool(bool),
     Int(i64),
     Text(String),
+    Hotkey(rewind_engine::Hotkey),
 }
 
 impl From<bool> for SettingValue {
@@ -494,6 +495,11 @@ impl From<&str> for SettingValue {
 impl From<String> for SettingValue {
     fn from(v: String) -> Self {
         SettingValue::Text(v)
+    }
+}
+impl From<rewind_engine::Hotkey> for SettingValue {
+    fn from(v: rewind_engine::Hotkey) -> Self {
+        SettingValue::Hotkey(v)
     }
 }
 impl From<PathBuf> for SettingValue {
@@ -570,6 +576,18 @@ impl SettingValue {
             ("copy_after_save", SettingValue::Bool(v)) => {
                 let changed = settings.copy_after_save != *v;
                 settings.copy_after_save = *v;
+                changed
+            }
+            (
+                "hotkey_toggle" | "hotkey_clip" | "hotkey_record" | "hotkey_screenshot"
+                | "hotkey_open",
+                SettingValue::Hotkey(hotkey),
+            ) => {
+                let action = key.trim_start_matches("hotkey_");
+                let changed = settings.hotkey(action) != *hotkey;
+                if changed {
+                    settings.set_hotkey(action, hotkey);
+                }
                 changed
             }
             ("encoder", SettingValue::Text(v)) => {

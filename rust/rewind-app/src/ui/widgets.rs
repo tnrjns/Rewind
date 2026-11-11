@@ -37,6 +37,17 @@ pub fn card(ui: &mut egui::Ui, title: Option<&str>, add: impl FnOnce(&mut egui::
 
 /// One label and description on the left, one control on the right.
 pub fn row(ui: &mut egui::Ui, title: &str, sub: Option<&str>, control: impl FnOnce(&mut egui::Ui)) {
+    row_with(ui, title, sub, theme::MUTED, control);
+}
+
+/// A row whose description is coloured, for a line that reports a problem.
+pub fn row_with(
+    ui: &mut egui::Ui,
+    title: &str,
+    sub: Option<&str>,
+    sub_color: Color32,
+    control: impl FnOnce(&mut egui::Ui),
+) {
     let text_width = (ui.available_width() - 300.0).max(180.0);
     egui::Frame::new()
         .inner_margin(egui::Margin {
@@ -52,7 +63,7 @@ pub fn row(ui: &mut egui::Ui, title: &str, sub: Option<&str>, control: impl FnOn
                     ui.label(RichText::new(title).size(13.5).strong());
                     if let Some(sub) = sub.filter(|text| !text.is_empty()) {
                         ui.add_space(2.0);
-                        ui.label(RichText::new(sub).size(11.5).color(theme::MUTED));
+                        ui.label(RichText::new(sub).size(11.5).color(sub_color));
                     }
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), control);

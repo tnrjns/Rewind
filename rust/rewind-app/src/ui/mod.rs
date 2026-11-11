@@ -7,6 +7,8 @@
 mod clips;
 mod dialogs;
 pub mod format;
+mod hotkeys;
+mod keys;
 mod replay;
 mod theme;
 mod widgets;
@@ -47,19 +49,30 @@ impl Change {
     }
 }
 
+/// What a page asks the shell to do after drawing.
+#[derive(Default)]
+pub struct PageOutput {
+    pub changes: Vec<Change>,
+    /// `Some(true)` unbinds the global hotkeys (a combo is being captured);
+    /// `Some(false)` binds them again.
+    pub hotkeys: Option<bool>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PageKind {
     Replay,
+    Hotkeys,
     Clips,
 }
 
 impl PageKind {
     /// The order the rail lists them in, matching the Python app's nav.
-    const ALL: [PageKind; 2] = [PageKind::Replay, PageKind::Clips];
+    const ALL: [PageKind; 3] = [PageKind::Replay, PageKind::Hotkeys, PageKind::Clips];
 
     fn label(self) -> &'static str {
         match self {
             PageKind::Replay => "Replay",
+            PageKind::Hotkeys => "Hotkeys",
             PageKind::Clips => "Clips",
         }
     }
@@ -67,6 +80,7 @@ impl PageKind {
 
 enum Page {
     Replay(replay::ReplayPage),
+    Hotkeys(hotkeys::HotkeysPage),
     // Boxed: the Clips page carries textures, jobs and a selection, and the enum should
     // not be sized for its largest member on every frame.
     Clips(Box<ClipsPage>),
@@ -76,6 +90,7 @@ impl Page {
     fn title(&self) -> &'static str {
         match self {
             Page::Replay(_) => "Replay",
+            Page::Hotkeys(_) => "Hotkeys",
             Page::Clips(_) => "Clips",
         }
     }
@@ -83,16 +98,26 @@ impl Page {
     fn subtitle(&self) -> Option<&'static str> {
         match self {
             Page::Replay(_) => Some(replay::ReplayPage::SUBTITLE),
+            Page::Hotkeys(_) => Some(hotkeys::HotkeysPage::SUBTITLE),
             Page::Clips(_) => None,
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, controller: &mut Controller) -> Vec<Change> {
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        controller: &mut Controller,
+        hotkeys: &Option<HotkeyManager>,
+    ) -> PageOutput {
         match self {
-            Page::Replay(page) => page.ui(ui, controller),
+            Page::Replay(page) => PageOutput {
+                changes: page.ui(ui, controller),
+                hotkeys: None,
+            },
+            Page::Hotkeys(page) => page.ui(ui, controller, hotkeys),
             Page::Clips(page) => {
                 page.ui(ui, controller);
-                Vec::new()
+                PageOutput::default()
             }
         }
     }
@@ -126,7 +151,7 @@ pub fn run(controller: Controller, shell: Shell) -> eframe::Result {
 
 struct RewindApp {
     controller: Controller,
-    pages: [Page; 2],
+    pages: [Page; 3],
     current: usize,
     presses: Receiver<String>,
     hotkeys: Option<HotkeyManager>,
@@ -163,6 +188,7 @@ impl RewindApp {
             controller,
             pages: [
                 Page::Replay(replay::ReplayPage::new()),
+                Page::Hotkeys(hotkeys::HotkeysPage::new()),
                 Page::Clips(Box::new(clips)),
             ],
             current: 0,
@@ -204,21 +230,38 @@ impl RewindApp {
     }
 
     fn absorb(&mut self, notices: Vec<Notice>) {
-        if let Page::Clips(clips) = &mut self.pages[1] {
-            for notice in notices {
-                clips.handle_notice(&notice);
+        for page in &mut self.pages {
+            if let Page::Clips(clips) = page {
+                for notice in &notices {
+                    clips.handle_notice(notice);
+                }
             }
+        }
+    }
+
+    /// Bind the current settings' hotkeys, after a change or a capture.
+    fn rebind_hotkeys(&mut self) {
+        if let Some(manager) = &self.hotkeys {
+            let settings = self.controller.settings();
+            manager.apply_settings(settings);
         }
     }
 
     /// Apply what the page asked for, and schedule the one restart it may need.
     fn apply_changes(&mut self, changes: Vec<Change>) {
+        let mut rebind = false;
         for change in changes {
+            if change.key.starts_with("hotkey_") {
+                rebind = true;
+            }
             let (notices, restart) = self.controller.set(change.key, change.value);
             self.absorb(notices);
             if restart {
                 self.restart_due = Some(Instant::now() + RESTART_DELAY);
             }
+        }
+        if rebind {
+            self.rebind_hotkeys();
         }
     }
 
@@ -355,7 +398,7 @@ impl eframe::App for RewindApp {
             )
             .show(ui, |ui| self.sidebar(ui));
 
-        let mut changes = Vec::new();
+        let mut output = PageOutput::default();
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
@@ -372,6 +415,7 @@ impl eframe::App for RewindApp {
                     controller,
                     pages,
                     current,
+                    hotkeys,
                     ..
                 } = self;
                 let page = &mut pages[*current];
@@ -381,9 +425,18 @@ impl eframe::App for RewindApp {
                     ui.label(RichText::new(subtitle).size(13.0).color(theme::MUTED));
                 }
                 ui.add_space(16.0);
-                changes = page.ui(ui, controller);
+                output = page.ui(ui, controller, hotkeys);
             });
-        self.apply_changes(changes);
+        self.apply_changes(output.changes);
+        match output.hotkeys {
+            Some(true) => {
+                if let Some(manager) = &self.hotkeys {
+                    let _ = manager.stop();
+                }
+            }
+            Some(false) => self.rebind_hotkeys(),
+            None => {}
+        }
     }
 }
 
