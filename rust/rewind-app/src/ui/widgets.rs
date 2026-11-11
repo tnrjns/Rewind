@@ -122,13 +122,21 @@ pub fn combo(ui: &mut egui::Ui, id: &str, labels: &[String], current: usize) -> 
 }
 
 /// An integer slider that snaps to `step`, with a right-hand value readout.
+/// What a slider did this frame.
+#[derive(Default)]
+pub struct SliderEdit {
+    pub changed: bool,
+    /// The handle was let go: the moment to play a sample of what was chosen.
+    pub released: bool,
+}
+
 pub fn slider(
     ui: &mut egui::Ui,
     value: &mut i64,
     range: (i64, i64),
     step: i64,
     suffix: &str,
-) -> bool {
+) -> SliderEdit {
     ui.spacing_mut().slider_width = 190.0;
     // Row controls sit in a right-to-left layout, so the readout is added before the
     // track: that renders as [track][value], the way the Python app's SliderControl does.
@@ -137,17 +145,19 @@ pub fn slider(
         egui::Label::new(egui::RichText::new(format!("{value}{suffix}")).size(12.5)),
     );
     let mut scaled = *value as f64;
-    let changed = ui
-        .add(
-            egui::Slider::new(&mut scaled, range.0 as f64..=range.1 as f64)
-                .step_by(step as f64)
-                .show_value(false),
-        )
-        .changed();
+    let response = ui.add(
+        egui::Slider::new(&mut scaled, range.0 as f64..=range.1 as f64)
+            .step_by(step as f64)
+            .show_value(false),
+    );
+    let changed = response.changed();
     if changed {
         *value = scaled.round() as i64;
     }
-    changed
+    SliderEdit {
+        changed,
+        released: response.drag_stopped(),
+    }
 }
 
 /// A number field with a step, for values where a slider would be too coarse.

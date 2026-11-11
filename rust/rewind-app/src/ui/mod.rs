@@ -11,6 +11,7 @@ mod hotkeys;
 mod keys;
 mod recording;
 mod replay;
+mod sound;
 mod theme;
 mod widgets;
 
@@ -66,15 +67,17 @@ enum PageKind {
     Replay,
     Recording,
     Hotkeys,
+    Sound,
     Clips,
 }
 
 impl PageKind {
     /// The order the rail lists them in, matching the Python app's nav.
-    const ALL: [PageKind; 4] = [
+    const ALL: [PageKind; 5] = [
         PageKind::Replay,
         PageKind::Recording,
         PageKind::Hotkeys,
+        PageKind::Sound,
         PageKind::Clips,
     ];
 
@@ -83,6 +86,7 @@ impl PageKind {
             PageKind::Replay => "Replay",
             PageKind::Recording => "Recording",
             PageKind::Hotkeys => "Hotkeys",
+            PageKind::Sound => "Sound",
             PageKind::Clips => "Clips",
         }
     }
@@ -92,6 +96,7 @@ enum Page {
     Replay(replay::ReplayPage),
     Recording(recording::RecordingPage),
     Hotkeys(hotkeys::HotkeysPage),
+    Sound(sound::SoundPage),
     // Boxed: the Clips page carries textures, jobs and a selection, and the enum should
     // not be sized for its largest member on every frame.
     Clips(Box<ClipsPage>),
@@ -103,6 +108,7 @@ impl Page {
             Page::Replay(_) => "Replay",
             Page::Recording(_) => "Recording",
             Page::Hotkeys(_) => "Hotkeys",
+            Page::Sound(_) => "Sound",
             Page::Clips(_) => "Clips",
         }
     }
@@ -112,6 +118,7 @@ impl Page {
             Page::Replay(_) => Some(replay::ReplayPage::SUBTITLE),
             Page::Recording(_) => Some(recording::RecordingPage::SUBTITLE),
             Page::Hotkeys(_) => Some(hotkeys::HotkeysPage::SUBTITLE),
+            Page::Sound(_) => Some(sound::SoundPage::SUBTITLE),
             Page::Clips(_) => None,
         }
     }
@@ -129,6 +136,7 @@ impl Page {
             },
             Page::Recording(page) => page.ui(ui, controller),
             Page::Hotkeys(page) => page.ui(ui, controller, hotkeys),
+            Page::Sound(page) => page.ui(ui, controller),
             Page::Clips(page) => {
                 page.ui(ui, controller);
                 PageOutput::default()
@@ -165,7 +173,7 @@ pub fn run(controller: Controller, shell: Shell) -> eframe::Result {
 
 struct RewindApp {
     controller: Controller,
-    pages: [Page; 4],
+    pages: [Page; 5],
     current: usize,
     presses: Receiver<String>,
     hotkeys: Option<HotkeyManager>,
@@ -204,6 +212,7 @@ impl RewindApp {
                 Page::Replay(replay::ReplayPage::new()),
                 Page::Recording(recording::RecordingPage::new()),
                 Page::Hotkeys(hotkeys::HotkeysPage::new()),
+                Page::Sound(sound::SoundPage::new()),
                 Page::Clips(Box::new(clips)),
             ],
             current: 0,

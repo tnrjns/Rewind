@@ -158,7 +158,7 @@ and tests them on Windows too, where the macOS-only ones are skipped and a test 
 tray's message pump is added.
 The window is drawn with [egui](https://github.com/emilk/egui), an immediate-mode Rust
 UI: no Qt, no web view, and one code path on both platforms. The Replay, Recording,
-Hotkeys and Clips pages and their feedback sounds are ported; the remaining pages still
+Hotkeys, Sound and Clips pages and their feedback sounds are ported; the remaining pages still
 live in `app/`.
 `rust/rewind-engine/README.md` covers the design and the platform details; each crate
 documents the behaviours that were subtle enough to get wrong once.

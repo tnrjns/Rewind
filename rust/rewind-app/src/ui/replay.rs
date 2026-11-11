@@ -133,7 +133,7 @@ impl ReplayPage {
                 "Replay length",
                 Some("Save anywhere from the last 15 seconds up to a full minute"),
                 |ui| {
-                    if widgets::slider(ui, &mut seconds, (15, 60), 5, " seconds") {
+                    if widgets::slider(ui, &mut seconds, (15, 60), 5, " seconds").changed {
                         changes.push(Change::new("clip_seconds", seconds));
                     }
                 },
@@ -167,7 +167,7 @@ impl ReplayPage {
                 settings.clip_seconds
             );
             widgets::row(ui, "Bitrate", Some(&bitrate_sub), |ui| {
-                if widgets::slider(ui, &mut rate, (5, 150), 5, " Mbps") {
+                if widgets::slider(ui, &mut rate, (5, 150), 5, " Mbps").changed {
                     changes.push(Change::new("bitrate_mbps", rate));
                 }
             });
@@ -315,7 +315,7 @@ impl ReplayPage {
             let mut system_volume = settings.system_volume as i64;
             widgets::row(ui, "Desktop volume", None, |ui| {
                 ui.add_enabled_ui(settings.system_audio, |ui| {
-                    if widgets::slider(ui, &mut system_volume, (0, 200), 5, "%") {
+                    if widgets::slider(ui, &mut system_volume, (0, 200), 5, "%").changed {
                         changes.push(Change::new("system_volume", system_volume));
                     }
                 });
@@ -355,7 +355,7 @@ impl ReplayPage {
             let mut mic_volume = settings.mic_volume as i64;
             widgets::row(ui, "Mic volume", None, |ui| {
                 ui.add_enabled_ui(settings.mic_enabled, |ui| {
-                    if widgets::slider(ui, &mut mic_volume, (0, 200), 5, "%") {
+                    if widgets::slider(ui, &mut mic_volume, (0, 200), 5, "%").changed {
                         changes.push(Change::new("mic_volume", mic_volume));
                     }
                 });
