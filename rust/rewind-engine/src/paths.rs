@@ -146,10 +146,21 @@ pub fn trim_target(video: &Path) -> PathBuf {
     candidate
 }
 
-/// Filename without its extension — the key Rewind uses in `clips.json` and for thumbnails.
+/// Filename without its extension — the thumbnail key.
 pub fn file_key(path: &Path) -> String {
     path.file_stem()
         .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// The `clips.json` key for a path: the file name **with** its extension.
+///
+/// The shipping Python app writes `"Rewind_2026-11-11_09-14-22.mp4"`, not the stem. Using
+/// the stem here would make every duration from an existing install read as missing, and
+/// entries written by this build invisible to that one.
+pub fn meta_key(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 

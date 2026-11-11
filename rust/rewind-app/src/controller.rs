@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use rewind_engine::ffmpeg::{find_ffmpeg, probe_duration};
 use rewind_engine::meta::{load_meta, update_meta};
-use rewind_engine::paths::file_key;
+use rewind_engine::paths::meta_key;
 use rewind_engine::{screenshot, trim, Event, Mode, Recorder, Settings, State};
 
 /// Something the controller wants the app to do — show a message, play a sound,
@@ -279,7 +279,7 @@ impl Controller {
             Ok(result) => {
                 let duration = result.end - result.start;
                 let _ = update_meta(
-                    &file_key(&result.path),
+                    &meta_key(&result.path),
                     &[(
                         "duration",
                         serde_json::json!((duration * 100.0).round() / 100.0),
@@ -299,13 +299,13 @@ impl Controller {
 
     /// Duration of a clip, from `clips.json` or by probing the file.
     pub fn clip_duration(&self, video: &Path) -> Option<f64> {
-        if let Some(known) = rewind_engine::meta::meta_duration(&file_key(video)) {
+        if let Some(known) = rewind_engine::meta::meta_duration(&meta_key(video)) {
             return Some(known);
         }
         let ffmpeg = self.ffmpeg.clone().or_else(find_ffmpeg)?;
         let duration = probe_duration(&ffmpeg, video)?;
         let _ = update_meta(
-            &file_key(video),
+            &meta_key(video),
             &[(
                 "duration",
                 serde_json::json!((duration * 100.0).round() / 100.0),
@@ -400,7 +400,7 @@ impl Controller {
             Event::ClipStarted => vec![Notice::Message(String::new())],
             Event::ClipSaved { path, duration } => {
                 let _ = update_meta(
-                    &file_key(&path),
+                    &meta_key(&path),
                     &[(
                         "duration",
                         serde_json::json!((duration * 100.0).round() / 100.0),

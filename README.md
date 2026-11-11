@@ -150,11 +150,14 @@ Honest limits, because they matter more than a slogan:
 | Path | What it is |
 |---|---|
 | `rust/rewind-engine` | Capture: replay ring buffer, clips, recordings, screenshots, trim |
-| `rust/rewind-app` | Shell: global hotkeys, tray, status pill, and the `rewind` binary |
+| `rust/rewind-app` | Shell: the window and Clips page, global hotkeys, tray, status pill, and the `rewind` binary |
 | `app/` | The shipping Python app, unchanged until cutover |
 
-Both crates are real: `cargo test --workspace` runs 135 tests on macOS and 136 on
+Both crates are real: `cargo test --workspace` runs 149 tests on macOS and 150 on
 Windows, and CI builds and tests them on both alongside the Python suite.
+The window is drawn with [egui](https://github.com/emilk/egui), an immediate-mode Rust
+UI: no Qt, no web view, and one code path on both platforms. The Clips page is the first
+page ported; the remaining pages and sounds still live in `app/`.
 `rust/rewind-engine/README.md` covers the design and the platform details; each crate
 documents the behaviours that were subtle enough to get wrong once.
 
@@ -162,8 +165,9 @@ documents the behaviours that were subtle enough to get wrong once.
 
 ```bash
 cd rust
-cargo test --workspace          # 135 tests (136 on Windows), no display needed
+cargo test --workspace          # 149 tests (150 on Windows), no display needed
 cargo run -p rewind-engine --release --example capture_diagnostic
+cargo run -p rewind-app --features tray   # the window, tray and hotkeys
 ```
 
 The diagnostic tries every capture path on your machine and prints FFmpeg's own reason

@@ -70,7 +70,11 @@ When testing audio by hand, play something first.
 ## Settings compatibility
 
 `settings.json`, `clips.json` and the data folders are byte-compatible with the
-Python build, so an existing install keeps its settings, metadata and clips. Keys
+Python build, so an existing install keeps its settings, metadata and clips. One detail
+is easy to get wrong and was: `clips.json` is keyed by **file name with extension**
+(`Rewind_2026-11-11_09-14-22.mp4`), while thumbnails are keyed by **stem**
+(`Rewind_2026-11-11_09-14-22.jpg`). `paths::meta_key` and `paths::file_key` respectively,
+and a test pins both. Keys
 this crate does not model (overlay colours, hotkey text, tutorial flags) are preserved
 on save rather than stripped.
 
@@ -112,8 +116,8 @@ because Qt declared awareness at startup.
 
 ## Not ported
 
-The window and Clips page, sounds, updates and single-instance plumbing stay in `app/`
-for now. This crate hands them the same primitives the Python controller used:
+Sounds, updates, single-instance plumbing and the remaining settings pages stay in
+`app/` for now. This crate hands them the same primitives the Python controller used:
 `Settings`, `Recorder` + `Event`, `take_screenshot`, `trim_clip`, `load_meta`,
 `list_monitors`, `list_microphones`.
 

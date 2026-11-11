@@ -1,119 +1,79 @@
-//! Rewind's tray binary.
+//! Rewind's binary: the window, plus the tray and hotkeys when built with `tray`.
 //!
-//! Everything runs on the main thread, because the platform requires it: menus must be
-//! created there, and macOS dispatches hotkeys through the main run loop. Capture work
-//! already happens on the engine's own threads, so the loop here only reads events and
-//! updates the tray.
+//! Everything platform-facing happens here, on the main thread, before the window opens:
+//! menus and the status item must be created there on both Windows and macOS, and the
+//! hotkey backend owns its own message loop.
 
-#[cfg(not(feature = "tray"))]
-fn main() {
-    eprintln!("build with --features tray to run the tray app");
-}
+use rewind_app::controller::Controller;
+use rewind_app::hotkeys::{HotkeyManager, Registration};
+use rewind_app::tray::TrayState;
+use rewind_app::ui::{self, Shell};
+use rewind_engine::Settings;
 
-#[cfg(feature = "tray")]
 fn main() {
+    // Before any window exists: Windows freezes DPI awareness at that moment, and a
+    // process that misses the window reports scaled monitor geometry for its whole life.
+    rewind_engine::platform::init_process();
+
     if let Err(message) = run() {
         eprintln!("Rewind could not start: {message}");
         std::process::exit(1);
     }
 }
 
-#[cfg(feature = "tray")]
 fn run() -> Result<(), String> {
-    use std::time::Duration;
-
-    use rewind_app::controller::Controller;
-    use rewind_app::hotkeys::{HotkeyManager, Registration};
-    use rewind_app::tray::TrayAction;
-    use rewind_app::tray::TrayState;
-    use rewind_app::tray_ui::{poll_menu_events, Tray};
-    use rewind_engine::Settings;
-
-    // Before any window exists: Windows locks DPI awareness at that moment, and a
-    // process that misses the window reports scaled monitor geometry for the rest of
-    // its life.
-    rewind_engine::platform::init_process();
-
     let settings = Settings::load();
-    let mut controller = Controller::new(settings.clone());
+    let controller = Controller::new(settings.clone());
 
+    let mut startup = Vec::new();
+    let hotkeys = start_hotkeys(&settings, &mut startup);
+
+    let state = TrayState::from_engine(controller.state(), controller.mode());
     let logo = std::env::var_os("REWIND_LOGO").map(std::path::PathBuf::from);
-    let tray_state = TrayState::from_engine(controller.state(), controller.mode());
-    let tray = Tray::new(tray_state, logo.as_deref())?;
 
-    let hotkeys = HotkeyManager::new().map_err(|e| e.to_string())?;
-    let bound = hotkeys.apply_settings(&settings);
-    for (name, reg) in &bound {
-        if *reg != Registration::Ok {
-            eprintln!("hotkey {name}: {reg:?} (already in use by another app?)");
-        }
-    }
+    #[cfg(feature = "tray")]
+    let shell = Shell {
+        hotkeys,
+        tray: build_tray(state, logo.as_deref(), &mut startup),
+        startup,
+    };
+    #[cfg(not(feature = "tray"))]
+    let shell = Shell { hotkeys, startup };
+    let _ = (state, logo);
 
-    // Hotkey presses arrive on the platform's thread; queue them for the main loop.
-    let (press_tx, press_rx) = std::sync::mpsc::channel::<String>();
-    rewind_app::hotkeys::set_global_handler(move |action| {
-        let _ = press_tx.send(action.to_string());
-    });
+    ui::run(controller, shell).map_err(|e| e.to_string())
+}
 
-    if settings.start_replay_on_launch {
-        controller.recorder().start();
-    }
-    println!("Rewind running in the tray ({})", tray_state.label());
-
-    let mut last_state = tray_state;
-    loop {
-        // Tray clicks arrive as window messages; nothing else reads that queue.
-        rewind_app::event_loop::pump();
-
-        // Hotkey presses.
-        while let Ok(action) = press_rx.try_recv() {
-            match action.as_str() {
-                // Quitting and window actions belong to the app, not the engine.
-                "open" => println!("open window requested"),
-                _ => {
-                    for notice in controller.on_hotkey(&action) {
-                        println!("{notice:?}");
-                    }
+/// Bind the configured hotkeys, reporting the ones another app already owns.
+fn start_hotkeys(settings: &Settings, startup: &mut Vec<String>) -> Option<HotkeyManager> {
+    match HotkeyManager::new() {
+        Ok(manager) => {
+            for (name, registration) in manager.apply_settings(settings) {
+                if !matches!(registration, Registration::Ok | Registration::Unset) {
+                    startup.push(format!("Hotkey {name} is already in use by another app"));
                 }
             }
+            Some(manager)
         }
+        Err(error) => {
+            startup.push(format!("Hotkeys unavailable: {error}"));
+            None
+        }
+    }
+}
 
-        // Tray clicks.
-        for action in poll_menu_events() {
-            match action {
-                TrayAction::Quit => {
-                    controller.shutdown();
-                    hotkeys.stop().ok();
-                    return Ok(());
-                }
-                TrayAction::OpenWindow => println!("open window requested"),
-                TrayAction::ToggleReplay => {
-                    controller.toggle_replay();
-                }
-                TrayAction::ToggleRecording => {
-                    controller.toggle_recording();
-                }
-                TrayAction::SaveClip => {
-                    controller.save_clip();
-                }
-                TrayAction::TakeScreenshot => {
-                    controller.take_screenshot();
-                }
-                TrayAction::OpenClipsFolder => {
-                    let _ = controller.open_clips_folder();
-                }
-            }
+/// Create the tray icon, or explain why it is missing.
+#[cfg(feature = "tray")]
+fn build_tray(
+    state: TrayState,
+    logo: Option<&std::path::Path>,
+    startup: &mut Vec<String>,
+) -> Option<rewind_app::tray_ui::Tray> {
+    match rewind_app::tray_ui::Tray::new(state, logo) {
+        Ok(tray) => Some(tray),
+        Err(error) => {
+            startup.push(format!("Tray icon unavailable: {error}"));
+            None
         }
-
-        // Engine events: keep the menu in step with what capture is doing.
-        for notice in controller.pump(Duration::from_millis(0)) {
-            println!("{notice:?}");
-        }
-        let state = TrayState::from_engine(controller.state(), controller.mode());
-        if state != last_state {
-            tray.render(state);
-            last_state = state;
-        }
-        std::thread::sleep(Duration::from_millis(100));
     }
 }

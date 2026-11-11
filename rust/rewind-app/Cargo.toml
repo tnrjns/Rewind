@@ -16,6 +16,10 @@ serde_json = "1"
 tray-icon = { version = "0.26", optional = true }
 muda = { version = "0.21", optional = true }
 png = { version = "0.18", optional = true }
+eframe = "0.37"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+trash = "5"
 
 [features]
 default = []
@@ -26,5 +30,8 @@ windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_DataExchange",
   "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
 ] }
