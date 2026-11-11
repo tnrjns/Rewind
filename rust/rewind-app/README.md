@@ -14,7 +14,7 @@ rewind-app/
 │   ├── event_loop.rs   the main thread's Windows message pump
 │   ├── overlay*.rs     status-pill content model and capture exclusion
 │   ├── clipboard.rs    file lists on the clipboard, for pasting into chat apps
-│   └── ui/             the window: sidebar, Replay/Hotkeys/Clips pages, modals, theme
+│   └── ui/             the window: sidebar, Replay/Recording/Hotkeys/Clips pages, modal dialogs, theme
 └── src/bin/rewind.rs   wiring: tray, hotkeys, then the window
 ```
 
