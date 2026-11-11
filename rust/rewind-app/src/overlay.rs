@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 /// Which small glyph sits in the coloured disc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Glyph {
     /// The rewind arrows: the app's own mark.
     Rewind,
@@ -26,7 +26,7 @@ pub enum Glyph {
 }
 
 /// Semantic colour, so the platform maps it to its own palette.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Accent {
     /// Accent colour: replay on, or a save in progress.
     Active,
@@ -36,6 +36,8 @@ pub enum Accent {
     Warning,
     /// Grey: starting, or off.
     Quiet,
+    /// Darker grey: off, so an inactive Rewind does not draw the eye.
+    Disabled,
 }
 
 /// What the pill is showing.
@@ -98,7 +100,7 @@ pub fn content(pill: Pill) -> Content {
     match pill {
         Pill::Idle(idle) => match idle {
             IdleState::Off => Content {
-                accent: Accent::Quiet,
+                accent: Accent::Disabled,
                 glyph: Glyph::Rewind,
                 title: "REWIND".into(),
                 detail: "Off".into(),
@@ -233,7 +235,8 @@ mod tests {
     fn off_says_off() {
         let c = content(Pill::Idle(IdleState::Off));
         assert_eq!(c.detail, "Off");
-        assert_eq!(c.accent, Accent::Quiet);
+        // Off and Starting are both grey, but Off is darker.
+        assert_eq!(c.accent, Accent::Disabled);
         assert_eq!(c.glyph, Glyph::Rewind);
     }
 

@@ -182,7 +182,11 @@ pub fn run(controller: Controller, shell: Shell) -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Rewind")
             .with_inner_size([1040.0, 720.0])
-            .with_min_inner_size([900.0, 600.0]),
+            .with_min_inner_size([900.0, 600.0])
+            // The GL config's alpha channel is chosen from this viewport, not from the
+            // per-viewport flag: without it the status pill's window is opaque black.
+            // The main window's panels cover its own framebuffer.
+            .with_transparent(true),
         ..Default::default()
     };
     eframe::run_native(
