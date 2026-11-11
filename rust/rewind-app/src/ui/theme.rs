@@ -98,6 +98,13 @@ pub fn rewind_glyph(ui: &mut egui::Ui, size: f32) {
     }
 }
 
+/// [`primary`] with an owned label, for buttons whose text changes.
+pub fn primary_text(label: impl Into<String>) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(label.into()).color(Color32::BLACK))
+        .fill(ACCENT)
+        .corner_radius(CornerRadius::same(8))
+}
+
 /// Paint a card: fill, rounded border, nothing else.
 pub fn card(painter: &egui::Painter, rect: egui::Rect, fill: Color32, border: Option<Color32>) {
     painter.rect_filled(rect, RADIUS, fill);

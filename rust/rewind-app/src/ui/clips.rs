@@ -1,10 +1,9 @@
 //! The Clips page: a grid of everything in the clips folder, with the actions the
 //! Python app offered on each one.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Sense, Stroke, Vec2};
 
@@ -12,7 +11,8 @@ use crate::clipboard;
 use crate::controller::{ClipEntry, ClipKind, Controller, Notice};
 use crate::ui::dialogs::{ConfirmDelete, Outcome, RenameDialog, TrimDialog};
 use crate::ui::format::{self, Filter};
-use crate::ui::{load_texture, theme};
+use crate::ui::thumbs::Thumbs;
+use crate::ui::{theme, widgets};
 
 const CELL_W: f32 = 240.0;
 const THUMB_H: f32 = 126.0;
@@ -21,9 +21,6 @@ const GAP: f32 = 14.0;
 /// How often the folder is re-listed. Cheap (one `read_dir`), and it is what makes a
 /// clip saved by a hotkey appear while the window is open.
 const REFRESH_EVERY: Duration = Duration::from_secs(2);
-/// Thumbnail JPEGs decoded per frame, so opening the page on a large library does not
-/// freeze the window for a second.
-const DECODE_BUDGET: usize = 4;
 const TOAST_FOR: Duration = Duration::from_secs(5);
 
 /// The one modal that can be open at a time.
@@ -31,11 +28,6 @@ enum Dialog {
     Rename(RenameDialog),
     Trim(TrimDialog),
     Delete(ConfirmDelete),
-}
-
-struct Thumb {
-    texture: egui::TextureHandle,
-    stamp: Option<SystemTime>,
 }
 
 /// A context-menu choice, collected during painting and applied afterwards so the grid
@@ -54,9 +46,7 @@ pub struct ClipsPage {
     visible: Vec<ClipEntry>,
     selected: Vec<PathBuf>,
     anchor: Option<usize>,
-    textures: HashMap<PathBuf, Thumb>,
-    thumb_jobs: ThumbJobs,
-    failed_thumbs: HashSet<PathBuf>,
+    thumbs: Thumbs,
     dialog: Option<Dialog>,
     notices: VecDeque<(String, Instant)>,
     last_refresh: Instant,
@@ -70,9 +60,7 @@ impl ClipsPage {
             visible: Vec::new(),
             selected: Vec::new(),
             anchor: None,
-            textures: HashMap::new(),
-            thumb_jobs: ThumbJobs::start(ctx.clone()),
-            failed_thumbs: HashSet::new(),
+            thumbs: Thumbs::new(ctx),
             dialog: None,
             notices: VecDeque::new(),
             last_refresh: Instant::now() - REFRESH_EVERY,
@@ -141,15 +129,7 @@ impl ClipsPage {
         ui.horizontal(|ui| {
             for filter in Filter::ALL {
                 let selected = self.filter == filter;
-                let (fill, text) = if selected {
-                    (theme::ACCENT, Color32::BLACK)
-                } else {
-                    (theme::CARD_2, theme::TEXT)
-                };
-                let button = egui::Button::new(egui::RichText::new(filter.label()).color(text))
-                    .fill(fill)
-                    .corner_radius(egui::CornerRadius::same(20));
-                if ui.add(button).clicked() && !selected {
+                if widgets::chip(ui, filter.label(), selected) && !selected {
                     self.filter = filter;
                     self.stale = true;
                 }
@@ -174,15 +154,11 @@ impl ClipsPage {
         let mut clicked: Option<(usize, bool, bool)> = None;
         let mut double: Option<usize> = None;
         let mut requested: Option<MenuRequest> = None;
-        let mut budget = DECODE_BUDGET;
-        let mut queued = Vec::new();
-
         {
             let Self {
                 visible,
                 selected,
-                textures,
-                failed_thumbs,
+                thumbs,
                 ..
             } = self;
             let columns = (((ui.available_width() + GAP) / (CELL_W + GAP)).floor() as usize).max(1);
@@ -199,18 +175,10 @@ impl ClipsPage {
                                     .allocate_exact_size(Vec2::new(CELL_W, CELL_H), Sense::click());
                                 if entry.kind == ClipKind::Video
                                     && (entry.thumbnail.is_none() || entry.duration.is_none())
-                                    && !failed_thumbs.contains(&entry.path)
                                 {
-                                    queued.push(entry.path.clone());
+                                    thumbs.request(entry.path.clone());
                                 }
-                                paint_cell(
-                                    ui,
-                                    rect,
-                                    entry,
-                                    selected.contains(&entry.path),
-                                    textures,
-                                    &mut budget,
-                                );
+                                paint_cell(ui, rect, entry, selected.contains(&entry.path), thumbs);
 
                                 if response.clicked() {
                                     let modifiers = ui.input(|i| i.modifiers);
@@ -284,9 +252,6 @@ impl ClipsPage {
                 });
         }
 
-        for path in queued {
-            self.thumb_jobs.request(path);
-        }
         if let Some((index, toggle, range)) = clicked {
             self.click(index, toggle, range);
         }
@@ -461,14 +426,9 @@ impl ClipsPage {
     }
 
     fn drain_thumb_jobs(&mut self) {
-        for (video, thumbnail) in self.thumb_jobs.drain() {
-            match thumbnail {
-                // The thumbnail is on disk now, so re-list and decode it next pass.
-                Some(_) => self.stale = true,
-                None => {
-                    self.failed_thumbs.insert(video);
-                }
-            }
+        // A thumbnail landed: re-list so the duration the worker probed shows up too.
+        if self.thumbs.begin() {
+            self.stale = true;
         }
     }
 
@@ -492,14 +452,7 @@ pub fn trash_name() -> &'static str {
 
 // ---------------------------------------------------------------- painting
 
-fn paint_cell(
-    ui: &egui::Ui,
-    rect: Rect,
-    entry: &ClipEntry,
-    selected: bool,
-    textures: &mut HashMap<PathBuf, Thumb>,
-    budget: &mut usize,
-) {
+fn paint_cell(ui: &egui::Ui, rect: Rect, entry: &ClipEntry, selected: bool, thumbs: &mut Thumbs) {
     let painter = ui.painter();
     theme::card(
         painter,
@@ -517,7 +470,7 @@ fn paint_cell(
         Vec2::new(CELL_W - 16.0, THUMB_H),
     );
 
-    match thumbnail_texture(ui.ctx(), entry, textures, budget) {
+    match thumbs.texture(ui.ctx(), entry) {
         Some(texture) => {
             let source = texture.size_vec2();
             let source_aspect = source.x / source.y.max(1.0);
@@ -564,7 +517,7 @@ fn paint_cell(
     }
 
     let text_width = CELL_W - 24.0;
-    let name = elide(
+    let name = widgets::elide(
         ui,
         &format::title(&entry.path),
         FontId::proportional(13.5),
@@ -577,7 +530,7 @@ fn paint_cell(
         FontId::proportional(13.5),
         theme::TEXT,
     );
-    let meta = elide(
+    let meta = widgets::elide(
         ui,
         &format::meta_text(entry),
         FontId::proportional(11.5),
@@ -590,128 +543,4 @@ fn paint_cell(
         FontId::proportional(11.5),
         theme::MUTED,
     );
-}
-
-/// Shrink text with an ellipsis until it fits `max_width`.
-fn elide(ui: &egui::Ui, text: &str, font: FontId, max_width: f32) -> String {
-    fn fits(ui: &egui::Ui, text: &str, font: &FontId, max_width: f32) -> bool {
-        ui.painter()
-            .layout_no_wrap(text.to_string(), font.clone(), theme::TEXT)
-            .size()
-            .x
-            <= max_width
-    }
-    if fits(ui, text, &font, max_width) {
-        return text.to_string();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut low = 0;
-    let mut high = chars.len();
-    while low + 1 < high {
-        let mid = (low + high) / 2;
-        let candidate: String = chars[..mid].iter().collect::<String>() + "…";
-        if fits(ui, &candidate, &font, max_width) {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    chars[..low].iter().collect::<String>() + "…"
-}
-
-/// The cached texture for a clip, decoding it when it is new or has changed.
-fn thumbnail_texture(
-    ctx: &egui::Context,
-    entry: &ClipEntry,
-    textures: &mut HashMap<PathBuf, Thumb>,
-    budget: &mut usize,
-) -> Option<egui::TextureHandle> {
-    let path = entry.thumbnail.as_ref()?;
-    let stamp = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    if let Some(cached) = textures.get(path) {
-        if cached.stamp == stamp {
-            return Some(cached.texture.clone());
-        }
-    }
-    if *budget == 0 {
-        return textures.get(path).map(|t| t.texture.clone());
-    }
-    *budget -= 1;
-    let pointer = std::path::Path::new(path);
-    let texture = load_texture(ctx, &format!("thumb:{}", path.display()), pointer)?;
-    textures.insert(
-        path.clone(),
-        Thumb {
-            texture: texture.clone(),
-            stamp,
-        },
-    );
-    Some(texture)
-}
-
-// ---------------------------------------------------------------- thumbnails
-
-/// Generates missing thumbnails off the UI thread.
-///
-/// Older clips saved before the thumbnail existed (or screenshots whose thumbnail was
-/// deleted) would otherwise stay blank forever. One worker thread keeps the FFmpeg
-/// spawns serial, which is plenty for a library that is mostly already done.
-struct ThumbJobs {
-    jobs: Sender<PathBuf>,
-    done: Receiver<(PathBuf, Option<PathBuf>)>,
-    inflight: HashSet<PathBuf>,
-}
-
-impl ThumbJobs {
-    fn start(ctx: egui::Context) -> ThumbJobs {
-        let (jobs, job_rx) = channel::<PathBuf>();
-        let (done, done_rx) = channel();
-        std::thread::Builder::new()
-            .name("rewind-thumbs".into())
-            .spawn(move || {
-                let ffmpeg = rewind_engine::find_ffmpeg();
-                for video in job_rx {
-                    let thumbnail = ffmpeg.as_ref().and_then(|ffmpeg| {
-                        // Probe and record the duration here, as the Python worker did:
-                        // it is the only place a clip's length is available before the
-                        // user opens it, and the grid shows it.
-                        let key = rewind_engine::paths::meta_key(&video);
-                        let duration = rewind_engine::meta::meta_duration(&key).or_else(|| {
-                            let probed = rewind_engine::ffmpeg::probe_duration(ffmpeg, &video)?;
-                            let _ = rewind_engine::meta::update_meta(
-                                &key,
-                                &[(
-                                    "duration",
-                                    serde_json::json!((probed * 100.0).round() / 100.0),
-                                )],
-                            );
-                            Some(probed)
-                        });
-                        rewind_engine::meta::make_thumbnail(ffmpeg, &video, duration)
-                    });
-                    let _ = done.send((video, thumbnail));
-                    ctx.request_repaint();
-                }
-            })
-            .ok();
-        ThumbJobs {
-            jobs,
-            done: done_rx,
-            inflight: HashSet::new(),
-        }
-    }
-
-    fn request(&mut self, video: PathBuf) {
-        if self.inflight.insert(video.clone()) {
-            let _ = self.jobs.send(video);
-        }
-    }
-
-    fn drain(&mut self) -> Vec<(PathBuf, Option<PathBuf>)> {
-        let results: Vec<_> = self.done.try_iter().collect();
-        for (video, _) in &results {
-            self.inflight.remove(video);
-        }
-        results
-    }
 }

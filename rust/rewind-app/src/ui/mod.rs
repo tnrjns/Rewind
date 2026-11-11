@@ -7,12 +7,14 @@
 mod clips;
 mod dialogs;
 pub mod format;
+mod home;
 mod hotkeys;
 mod keys;
 mod recording;
 mod replay;
 mod sound;
 mod theme;
+mod thumbs;
 mod widgets;
 
 pub use clips::ClipsPage;
@@ -64,6 +66,7 @@ pub struct PageOutput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PageKind {
+    Home,
     Replay,
     Recording,
     Hotkeys,
@@ -73,7 +76,8 @@ enum PageKind {
 
 impl PageKind {
     /// The order the rail lists them in, matching the Python app's nav.
-    const ALL: [PageKind; 5] = [
+    const ALL: [PageKind; 6] = [
+        PageKind::Home,
         PageKind::Replay,
         PageKind::Recording,
         PageKind::Hotkeys,
@@ -83,6 +87,7 @@ impl PageKind {
 
     fn label(self) -> &'static str {
         match self {
+            PageKind::Home => "Home",
             PageKind::Replay => "Replay",
             PageKind::Recording => "Recording",
             PageKind::Hotkeys => "Hotkeys",
@@ -93,6 +98,7 @@ impl PageKind {
 }
 
 enum Page {
+    Home(home::HomePage),
     Replay(replay::ReplayPage),
     Recording(recording::RecordingPage),
     Hotkeys(hotkeys::HotkeysPage),
@@ -105,6 +111,7 @@ enum Page {
 impl Page {
     fn title(&self) -> &'static str {
         match self {
+            Page::Home(_) => "Home",
             Page::Replay(_) => "Replay",
             Page::Recording(_) => "Recording",
             Page::Hotkeys(_) => "Hotkeys",
@@ -115,6 +122,7 @@ impl Page {
 
     fn subtitle(&self) -> Option<&'static str> {
         match self {
+            Page::Home(_) => None,
             Page::Replay(_) => Some(replay::ReplayPage::SUBTITLE),
             Page::Recording(_) => Some(recording::RecordingPage::SUBTITLE),
             Page::Hotkeys(_) => Some(hotkeys::HotkeysPage::SUBTITLE),
@@ -130,6 +138,7 @@ impl Page {
         hotkeys: &Option<HotkeyManager>,
     ) -> PageOutput {
         match self {
+            Page::Home(page) => page.ui(ui, controller),
             Page::Replay(page) => PageOutput {
                 changes: page.ui(ui, controller),
                 ..PageOutput::default()
@@ -173,7 +182,7 @@ pub fn run(controller: Controller, shell: Shell) -> eframe::Result {
 
 struct RewindApp {
     controller: Controller,
-    pages: [Page; 5],
+    pages: [Page; 6],
     current: usize,
     presses: Receiver<String>,
     hotkeys: Option<HotkeyManager>,
@@ -188,8 +197,10 @@ impl RewindApp {
     fn new(cc: &eframe::CreationContext<'_>, controller: Controller, shell: Shell) -> RewindApp {
         theme::apply(&cc.egui_ctx);
         let mut clips = ClipsPage::new(&cc.egui_ctx);
-        for message in shell.startup {
-            clips.notice(message);
+        let mut home = home::HomePage::new(&cc.egui_ctx);
+        for message in &shell.startup {
+            clips.notice(message.clone());
+            home.notice(message.clone());
         }
         if controller.settings().start_replay_on_launch {
             controller.recorder().start();
@@ -209,6 +220,7 @@ impl RewindApp {
         RewindApp {
             controller,
             pages: [
+                Page::Home(home),
                 Page::Replay(replay::ReplayPage::new()),
                 Page::Recording(recording::RecordingPage::new()),
                 Page::Hotkeys(hotkeys::HotkeysPage::new()),
@@ -255,10 +267,18 @@ impl RewindApp {
 
     fn absorb(&mut self, notices: Vec<Notice>) {
         for page in &mut self.pages {
-            if let Page::Clips(clips) = page {
-                for notice in &notices {
-                    clips.handle_notice(notice);
+            match page {
+                Page::Clips(clips) => {
+                    for notice in &notices {
+                        clips.handle_notice(notice);
+                    }
                 }
+                Page::Home(home) => {
+                    for notice in &notices {
+                        home.handle_notice(notice);
+                    }
+                }
+                _ => {}
             }
         }
     }

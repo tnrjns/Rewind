@@ -80,22 +80,33 @@ pub fn separator(ui: &mut egui::Ui) {
 
 /// A switch, as the Python app draws it: a pill that flips rather than a tick box.
 pub fn switch(ui: &mut egui::Ui, on: &mut bool) -> bool {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(40.0, 22.0), Sense::click());
+    switch_sized(ui, on, Vec2::new(40.0, 22.0))
+}
+
+/// The same switch at the hero's size.
+pub fn switch_large(ui: &mut egui::Ui, on: &mut bool) -> bool {
+    switch_sized(ui, on, Vec2::new(58.0, 32.0))
+}
+
+fn switch_sized(ui: &mut egui::Ui, on: &mut bool, size: Vec2) -> bool {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if response.clicked() {
         *on = !*on;
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     let t = ui.ctx().animate_bool(response.id, *on);
     let painter = ui.painter();
+    let radius = rect.height() / 2.0;
     painter.rect_filled(
         rect,
-        egui::CornerRadius::same(11),
+        egui::CornerRadius::same(radius as u8),
         if *on { theme::ACCENT } else { theme::FIELD },
     );
-    let knob_x = rect.left() + 11.0 + (rect.width() - 22.0) * t;
+    let knob = radius - 3.0;
+    let knob_x = rect.left() + radius + (rect.width() - rect.height()) * t;
     painter.circle_filled(
         egui::pos2(knob_x, rect.center().y),
-        8.0,
+        knob,
         if *on {
             Color32::from_rgb(0x1B, 0x1B, 0x1B)
         } else {
@@ -103,6 +114,87 @@ pub fn switch(ui: &mut egui::Ui, on: &mut bool) -> bool {
         },
     );
     response.clicked()
+}
+
+/// A thin progress bar: `#383838` track, accent fill, as the Home page draws it.
+pub fn bar(ui: &mut egui::Ui, fraction: f32, width: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 6.0), Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::same(3),
+        Color32::from_rgb(0x38, 0x38, 0x38),
+    );
+    let filled = fraction.clamp(0.0, 1.0) * rect.width();
+    if filled > 0.5 {
+        painter.rect_filled(
+            egui::Rect::from_min_size(rect.min, Vec2::new(filled, rect.height())),
+            egui::CornerRadius::same(3),
+            theme::ACCENT,
+        );
+    }
+}
+
+/// One of the four Home tiles: a small label over a value.
+pub fn tile(ui: &mut egui::Ui, label: &str, value: &str) {
+    egui::Frame::new()
+        .fill(theme::CARD_2)
+        .stroke(Stroke::new(1.0, theme::BORDER))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin {
+            left: 14,
+            right: 14,
+            top: 11,
+            bottom: 12,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(label).size(11.0).strong().color(theme::MUTED));
+            ui.add_space(3.0);
+            ui.label(RichText::new(value).size(15.0).strong());
+        });
+}
+
+/// A filter/quick-setting pill.
+pub fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
+    let (fill, text) = if selected {
+        (theme::ACCENT, Color32::BLACK)
+    } else {
+        (theme::CARD_2, theme::TEXT)
+    };
+    ui.add(
+        egui::Button::new(RichText::new(label).color(text))
+            .fill(fill)
+            .corner_radius(egui::CornerRadius::same(20)),
+    )
+    .clicked()
+}
+
+/// Shrink text with an ellipsis until it fits `max_width`.
+pub fn elide(ui: &egui::Ui, text: &str, font: egui::FontId, max_width: f32) -> String {
+    fn fits(ui: &egui::Ui, text: &str, font: &egui::FontId, max_width: f32) -> bool {
+        ui.painter()
+            .layout_no_wrap(text.to_string(), font.clone(), theme::TEXT)
+            .size()
+            .x
+            <= max_width
+    }
+    if fits(ui, text, &font, max_width) {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut low = 0;
+    let mut high = chars.len();
+    while low + 1 < high {
+        let mid = (low + high) / 2;
+        let candidate: String = chars[..mid].iter().collect::<String>() + "…";
+        if fits(ui, &candidate, &font, max_width) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    chars[..low].iter().collect::<String>() + "…"
 }
 
 /// A dropdown over fixed labels; returns the index the user picked, if any.
