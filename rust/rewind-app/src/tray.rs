@@ -66,7 +66,7 @@ pub struct MenuItem {
 }
 
 /// What a menu entry does, mapped onto the controller's actions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrayAction {
     OpenWindow,
     ToggleReplay,

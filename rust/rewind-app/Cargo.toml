@@ -11,6 +11,16 @@ repository.workspace = true
 rewind-engine = { path = "../rewind-engine" }
 serde_json = "1"
 
+# The tray needs a platform window/event loop, so it is optional: the library stays
+# headless-testable without it, and the binary turns it on.
+tray-icon = { version = "0.26", optional = true }
+muda = { version = "0.21", optional = true }
+png = { version = "0.18", optional = true }
+
+[features]
+default = []
+tray = ["dep:tray-icon", "dep:muda", "dep:png"]
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
   "Win32_Foundation",

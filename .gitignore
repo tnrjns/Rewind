@@ -7,4 +7,6 @@ dist/
 ffmpeg/
 *.log
 .mypy_cache/
-bin/
+# The compiled Swift audio helper. Anchored to the repo root: a bare `bin/` also
+# matches `rust/rewind-app/src/bin/`, which is source.
+/bin/

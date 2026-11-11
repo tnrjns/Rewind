@@ -10,6 +10,8 @@
 pub mod controller;
 pub mod hotkeys;
 pub mod tray;
+#[cfg(feature = "tray")]
+pub mod tray_ui;
 
 pub use controller::{Action, ClipEntry, ClipKind, Controller, Notice, SettingValue};
 pub use hotkeys::{HotkeyError, HotkeyManager, Registration, HOTKEY_ACTIONS};
