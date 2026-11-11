@@ -373,6 +373,15 @@ impl Controller {
             .collect()
     }
 
+    /// Put a finished file on the clipboard, as "copy each clip when it saves" asks.
+    ///
+    /// The Python app copied on both clip and recording saves, silently. A copy that
+    /// fails must not turn a good save into an error notice — the clip is still there.
+    fn copy_to_clipboard(&self, path: &Path) {
+        let files = crate::clipboard::existing(&[path.to_path_buf()]);
+        let _ = crate::clipboard::copy_files(&files);
+    }
+
     pub fn open_clips_folder(&self) -> Result<(), String> {
         std::fs::create_dir_all(&self.settings.output_dir).map_err(|e| e.to_string())?;
         rewind_engine::paths::open_path(&self.settings.output_dir);
@@ -406,13 +415,21 @@ impl Controller {
                         serde_json::json!((duration * 100.0).round() / 100.0),
                     )],
                 );
+                if self.settings.copy_after_save {
+                    self.copy_to_clipboard(&path);
+                }
                 vec![Notice::ClipSaved { path, duration }, Notice::ClipsChanged]
             }
             Event::ClipFailed(message) => vec![Notice::Failed(message)],
-            Event::RecordingSaved { path, duration } => vec![
-                Notice::RecordingSaved { path, duration },
-                Notice::ClipsChanged,
-            ],
+            Event::RecordingSaved { path, duration } => {
+                if self.settings.copy_after_save {
+                    self.copy_to_clipboard(&path);
+                }
+                vec![
+                    Notice::RecordingSaved { path, duration },
+                    Notice::ClipsChanged,
+                ]
+            }
             Event::RecordingFailed(message) => vec![Notice::Failed(message)],
             Event::ThumbnailReady(_) => vec![Notice::ClipsChanged],
             Event::EncodersDetected(_) => Vec::new(),
