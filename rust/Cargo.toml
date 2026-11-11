@@ -1,0 +1,15 @@
+[workspace]
+members = ["rewind-engine"]
+resolver = "2"
+
+[workspace.package]
+version = "1.3.0"
+edition = "2021"
+rust-version = "1.85"
+license = "FSL-1.1-ALv2"
+repository = "https://github.com/tnrjns/Rewind"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
