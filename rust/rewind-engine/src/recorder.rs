@@ -515,7 +515,7 @@ fn volume_for(name: &str, settings: &Settings) -> f64 {
     } else {
         settings.mic_volume
     };
-    raw.clamp(0, 100) as f64 / 100.0
+    raw.clamp(0, 200) as f64 / 100.0
 }
 
 /// Append one line to `ffmpeg.log`, with a wall-clock time.

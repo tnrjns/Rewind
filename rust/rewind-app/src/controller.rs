@@ -531,13 +531,13 @@ impl SettingValue {
                 changed
             }
             ("system_volume", SettingValue::Int(v)) => {
-                let v = (*v).clamp(0, 100) as i32;
+                let v = (*v).clamp(0, 200) as i32;
                 let changed = settings.system_volume != v;
                 settings.system_volume = v;
                 changed
             }
             ("mic_volume", SettingValue::Int(v)) => {
-                let v = (*v).clamp(0, 100) as i32;
+                let v = (*v).clamp(0, 200) as i32;
                 let changed = settings.mic_volume != v;
                 settings.mic_volume = v;
                 changed
