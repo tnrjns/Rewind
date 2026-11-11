@@ -689,6 +689,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
+name = "rewind-app"
+version = "1.3.0"
+dependencies = [
+ "rewind-engine",
+ "windows",
+]
+
+[[package]]
 name = "rewind-engine"
 version = "1.3.0"
 dependencies = [

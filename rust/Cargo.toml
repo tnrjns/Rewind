@@ -1,5 +1,5 @@
 [workspace]
-members = ["rewind-engine"]
+members = ["rewind-engine", "rewind-app"]
 resolver = "2"
 
 [workspace.package]

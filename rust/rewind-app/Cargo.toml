@@ -1,0 +1,19 @@
+[package]
+name = "rewind-app"
+description = "Rewind's desktop shell: global hotkeys, tray, and the glue that drives the capture engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rewind-engine = { path = "../rewind-engine" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_LibraryLoader",
+] }

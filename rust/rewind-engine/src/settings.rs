@@ -373,6 +373,58 @@ impl Settings {
         }
     }
 
+    /// Hotkey bound to `action` (`toggle`, `clip`, `record`, `screenshot`, `open`).
+    ///
+    /// Hotkeys live in the passthrough map because the engine itself never uses them;
+    /// the shell reads them through here so the JSON shape stays in one place.
+    pub fn hotkey(&self, action: &str) -> Hotkey {
+        let key = format!("hotkey_{action}");
+        let fallback = match action {
+            "toggle" => default_hotkeys().0,
+            "clip" => default_hotkeys().1,
+            "record" => default_hotkeys().2,
+            "screenshot" => default_hotkeys().3,
+            "open" => default_hotkeys().4,
+            _ => default_hotkeys().0,
+        };
+        let Some(Value::Object(map)) = self.extra.get(&key) else {
+            return fallback;
+        };
+        let mods = map
+            .get("mods")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(fallback.mods);
+        let vk = map
+            .get("vk")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(fallback.vk);
+        let text = map
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or(fallback.text);
+        Hotkey { mods, vk, text }
+    }
+
+    /// Replace one action's hotkey, keeping the rest of the file untouched.
+    pub fn set_hotkey(&mut self, action: &str, hotkey: &Hotkey) {
+        let key = format!("hotkey_{action}");
+        self.extra.insert(
+            key,
+            serde_json::json!({ "mods": hotkey.mods, "vk": hotkey.vk, "text": hotkey.text }),
+        );
+    }
+
+    /// All five hotkeys, in the order the tray and settings page list them.
+    pub fn hotkeys(&self) -> Vec<(String, Hotkey)> {
+        ["toggle", "clip", "record", "screenshot", "open"]
+            .iter()
+            .map(|name| ((*name).to_string(), self.hotkey(name)))
+            .collect()
+    }
+
     /// Serialise back to the on-disk shape: known keys first, unknown keys preserved.
     pub fn to_json_value(&self) -> Value {
         let mut map = Map::new();
