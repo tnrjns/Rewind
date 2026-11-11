@@ -53,6 +53,12 @@ fn main() {
         out => println!("FAIL: ffmpeg does not run ({})", out.stderr_tail(300)),
     }
 
+    #[cfg(target_os = "macos")]
+    println!(
+        "note: the app captures through ScreenCaptureKit so the status pill is excluded;\n\
+         this tool exercises the avfoundation fallback instead (SCK frames need a pipe)."
+    );
+
     let monitors = list_monitors();
     println!("\nmonitors ({}):", monitors.len());
     for (i, m) in monitors.iter().enumerate() {
