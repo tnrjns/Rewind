@@ -9,6 +9,8 @@
 
 pub mod controller;
 pub mod hotkeys;
+pub mod tray;
 
 pub use controller::{Action, ClipEntry, ClipKind, Controller, Notice, SettingValue};
 pub use hotkeys::{HotkeyError, HotkeyManager, Registration, HOTKEY_ACTIONS};
+pub use tray::{menu, tooltip, MenuItem, TrayAction, TrayState};
