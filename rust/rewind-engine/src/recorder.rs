@@ -165,11 +165,15 @@ struct Core {
 /// The in-process frame source feeding FFmpeg's stdin, when one is used.
 #[cfg(target_os = "macos")]
 type FrameSource = Option<crate::sck::Capture>;
+/// Non-macOS builds have no in-process frame source; a marker keeps the plumbing
+/// identical without a unit-typed binding (clippy rejects those).
 #[cfg(not(target_os = "macos"))]
-type FrameSource = ();
+struct FrameSource;
 
 #[cfg(not(target_os = "macos"))]
-fn no_frame_source() -> FrameSource {}
+fn no_frame_source() -> FrameSource {
+    FrameSource
+}
 
 #[cfg(target_os = "macos")]
 fn has_frame_source(source: &FrameSource) -> bool {
@@ -1225,7 +1229,7 @@ impl Worker {
         _proc: &mut Child,
         _settings: &Settings,
     ) -> Result<FrameSource, String> {
-        Ok(())
+        Ok(FrameSource)
     }
 
     // ------------------------------------------------------------ recording finish
