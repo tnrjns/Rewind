@@ -7,6 +7,9 @@ use std::io::Write;
 use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::paths::{data_dir, sub_dir};
@@ -136,22 +139,35 @@ pub fn run<S: AsRef<OsStr>>(
     };
 
     // Drain pipes on threads so a chatty child can never block on a full pipe buffer.
-    let mut out_pipe = child.stdout.take();
-    let mut err_pipe = child.stderr.take();
-    let out_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = out_pipe.as_mut() {
-            let _ = io::Read::read_to_end(p, &mut buf);
-        }
-        buf
-    });
-    let err_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = err_pipe.as_mut() {
-            let _ = io::Read::read_to_end(p, &mut buf);
-        }
-        buf
-    });
+    // Each hands its buffer back over a channel and checks `reader_stop`, because a
+    // grandchild that inherited the pipe outlives the kill below and would otherwise
+    // hold the read open long past the deadline.
+    let out_pipe = child.stdout.take();
+    let err_pipe = child.stderr.take();
+    let reader_stop = Arc::new(AtomicBool::new(false));
+    let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+    let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
+    let spawn_reader = |pipe: Option<Box<dyn io::Read + Send>>,
+                        tx: mpsc::Sender<Vec<u8>>,
+                        stop: Arc<AtomicBool>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                read_until_idle(&mut p, &mut buf, &stop);
+            }
+            let _ = tx.send(buf);
+        });
+    };
+    spawn_reader(
+        out_pipe.map(|p| Box::new(p) as Box<dyn io::Read + Send>),
+        out_tx,
+        Arc::clone(&reader_stop),
+    );
+    spawn_reader(
+        err_pipe.map(|p| Box::new(p) as Box<dyn io::Read + Send>),
+        err_tx,
+        Arc::clone(&reader_stop),
+    );
 
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
@@ -163,16 +179,27 @@ pub fn run<S: AsRef<OsStr>>(
         }
         if Instant::now() >= deadline {
             timed_out = true;
+            reader_stop.store(true, Ordering::SeqCst);
             let _ = child.kill();
             let _ = child.wait();
             break None;
         }
         std::thread::sleep(Duration::from_millis(10));
     };
+    reader_stop.store(true, Ordering::SeqCst);
 
-    let stdout = out_handle.join().unwrap_or_default();
-    let stderr = err_handle.join().unwrap_or_default();
+    // Collect what the readers gathered, sharing one short grace between them so a
+    // straggler cannot stretch the call past its deadline. On a normal exit the readers
+    // have already finished, so this returns immediately.
+    let grace_until = Instant::now() + Duration::from_millis(200);
+    let mut stdout = out_rx
+        .recv_timeout(grace_until.saturating_duration_since(Instant::now()))
+        .unwrap_or_default();
+    let stderr = err_rx
+        .recv_timeout(grace_until.saturating_duration_since(Instant::now()))
+        .unwrap_or_default();
     if timed_out {
+        stdout.clear();
         let mut err = stderr;
         err.extend_from_slice(b"\ntimeout");
         return Output {
@@ -186,6 +213,27 @@ pub fn run<S: AsRef<OsStr>>(
         status: code,
         stdout,
         stderr,
+    }
+}
+
+/// Read from `pipe` until EOF or `stop`, without blocking past `stop`.
+///
+/// A plain `read_to_end` waits for EOF, which never comes while anything else holds
+/// the write end of the pipe — including a grandchild that survived killing the child.
+fn read_until_idle(pipe: &mut (dyn io::Read + Send), buf: &mut Vec<u8>, stop: &AtomicBool) {
+    let mut chunk = [0u8; 8192];
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
+        // Park the reader on a thread only if the pipe is expected to stay quiet;
+        // in practice reads return promptly whenever the child writes anything.
+        match pipe.read(&mut chunk) {
+            Ok(0) => return,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => return,
+        }
     }
 }
 
@@ -639,9 +687,24 @@ mod tests {
         let started = std::time::Instant::now();
         let out = run(program, &args, Duration::from_millis(400), None);
         assert_eq!(out.status, 124, "stderr: {}", out.stderr_lossy());
+        // The call must return close to the deadline even though the killed process
+        // leaves a child holding the pipe: waiting for EOF would hang for its lifetime.
         assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the child was not killed at the deadline"
+            started.elapsed() < Duration::from_secs(3),
+            "run() took {:?} for a 400 ms timeout",
+            started.elapsed()
         );
+    }
+
+    #[test]
+    fn output_is_captured_on_a_normal_exit() {
+        #[cfg(target_os = "windows")]
+        let (program, args) = ("cmd", vec!["/C".to_string(), "echo hi".to_string()]);
+        #[cfg(not(target_os = "windows"))]
+        let (program, args) = ("/bin/sh", vec!["-c".to_string(), "echo hi".to_string()]);
+
+        let out = run(program, &args, Duration::from_secs(10), None);
+        assert_eq!(out.status, 0);
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
     }
 }
