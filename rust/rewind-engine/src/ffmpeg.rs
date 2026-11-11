@@ -186,18 +186,28 @@ pub fn run<S: AsRef<OsStr>>(
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    reader_stop.store(true, Ordering::SeqCst);
-
-    // Collect what the readers gathered, sharing one short grace between them so a
-    // straggler cannot stretch the call past its deadline. On a normal exit the readers
-    // have already finished, so this returns immediately.
-    let grace_until = Instant::now() + Duration::from_millis(200);
-    let mut stdout = out_rx
-        .recv_timeout(grace_until.saturating_duration_since(Instant::now()))
-        .unwrap_or_default();
-    let stderr = err_rx
-        .recv_timeout(grace_until.saturating_duration_since(Instant::now()))
-        .unwrap_or_default();
+    // Let the readers reach EOF on a normal exit. Stopping them the moment the child is
+    // reaped races the first read and loses the entire output of a command that finishes
+    // in a few milliseconds — which is exactly what a `-version` probe does. A grandchild
+    // that inherited a pipe can hold it open, so the wait is bounded: past that the
+    // readers are stopped and asked for whatever they already have.
+    let collect = |rx: &mpsc::Receiver<Vec<u8>>| -> Vec<u8> {
+        if timed_out {
+            return rx
+                .recv_timeout(Duration::from_millis(100))
+                .unwrap_or_default();
+        }
+        match rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                reader_stop.store(true, Ordering::SeqCst);
+                rx.recv_timeout(Duration::from_millis(100))
+                    .unwrap_or_default()
+            }
+        }
+    };
+    let mut stdout = collect(&out_rx);
+    let stderr = collect(&err_rx);
     if timed_out {
         stdout.clear();
         let mut err = stderr;
@@ -703,8 +713,17 @@ mod tests {
         #[cfg(not(target_os = "windows"))]
         let (program, args) = ("/bin/sh", vec!["-c".to_string(), "echo hi".to_string()]);
 
-        let out = run(program, &args, Duration::from_secs(10), None);
-        assert_eq!(out.status, 0);
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
+        // Repeated on purpose: the race this covers only appears when the child exits
+        // before its reader thread has had a turn, which is rare on an idle machine and
+        // common on a loaded CI runner. A single run used to pass by luck.
+        for attempt in 0..20 {
+            let out = run(program, &args, Duration::from_secs(10), None);
+            assert_eq!(out.status, 0, "attempt {attempt}");
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                "hi",
+                "stdout lost on attempt {attempt}"
+            );
+        }
     }
 }
