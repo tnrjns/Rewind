@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 /// Which small glyph sits in the coloured disc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Glyph {
     /// The rewind arrows: the app's own mark.
     Rewind,
@@ -26,7 +26,7 @@ pub enum Glyph {
 }
 
 /// Semantic colour, so the platform maps it to its own palette.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Accent {
     /// Accent colour: replay on, or a save in progress.
     Active,
@@ -36,6 +36,8 @@ pub enum Accent {
     Warning,
     /// Grey: starting, or off.
     Quiet,
+    /// Darker grey: off, so an inactive Rewind does not draw the eye.
+    Disabled,
 }
 
 /// What the pill is showing.
@@ -98,7 +100,7 @@ pub fn content(pill: Pill) -> Content {
     match pill {
         Pill::Idle(idle) => match idle {
             IdleState::Off => Content {
-                accent: Accent::Quiet,
+                accent: Accent::Disabled,
                 glyph: Glyph::Rewind,
                 title: "REWIND".into(),
                 detail: "Off".into(),
@@ -169,12 +171,14 @@ pub fn content(pill: Pill) -> Content {
 /// overflow the fixed-width pill.
 pub const DETAIL_LIMIT: usize = 28;
 
-/// Trim to `max` characters on a character boundary.
+/// Trim to `max` characters on a character boundary, marking the cut.
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }
-    text.chars().take(max).collect()
+    let mut trimmed: String = text.chars().take(max.saturating_sub(1)).collect();
+    trimmed.push('…');
+    trimmed
 }
 
 /// How far through an animation cycle the pill is, for the spinner and the halo.
@@ -231,7 +235,8 @@ mod tests {
     fn off_says_off() {
         let c = content(Pill::Idle(IdleState::Off));
         assert_eq!(c.detail, "Off");
-        assert_eq!(c.accent, Accent::Quiet);
+        // Off and Starting are both grey, but Off is darker.
+        assert_eq!(c.accent, Accent::Disabled);
         assert_eq!(c.glyph, Glyph::Rewind);
     }
 
@@ -315,7 +320,12 @@ mod tests {
             detail: "🎬".repeat(40),
         }));
         assert_eq!(c.detail.chars().count(), DETAIL_LIMIT);
-        assert!(c.detail.chars().all(|ch| ch == '🎬'));
+        // One character is spent on the ellipsis; the rest are whole emoji.
+        assert_eq!(
+            c.detail.chars().filter(|ch| *ch == '🎬').count(),
+            DETAIL_LIMIT - 1
+        );
+        assert!(c.detail.ends_with('…'));
     }
 
     #[test]

@@ -24,6 +24,8 @@ use rewind_engine::{screenshot, trim, Event, Mode, Recorder, Settings, State};
 pub enum Notice {
     /// Text for the status banner; an empty string clears it.
     Message(String),
+    /// A clip save began, so the pill can say so instead of looking idle.
+    ClipStarted,
     /// A clip landed; play the clip sound and refresh the list.
     ClipSaved {
         path: PathBuf,
@@ -406,7 +408,7 @@ impl Controller {
                 vec![Notice::StateChanged(state)]
             }
             Event::Error(message) => vec![Notice::Message(message)],
-            Event::ClipStarted => vec![Notice::Message(String::new())],
+            Event::ClipStarted => vec![Notice::ClipStarted],
             Event::ClipSaved { path, duration } => {
                 let _ = update_meta(
                     &meta_key(&path),
@@ -607,6 +609,46 @@ impl SettingValue {
                 }
                 changed
             }
+            ("overlay_enabled", SettingValue::Bool(v)) => {
+                let changed = settings.overlay_enabled != *v;
+                settings.overlay_enabled = *v;
+                changed
+            }
+            ("overlay_mode", SettingValue::Text(v)) => {
+                let mode = if v == "auto" {
+                    "auto".to_string()
+                } else {
+                    "always".to_string()
+                };
+                let changed = settings.overlay_mode != mode;
+                settings.overlay_mode = mode;
+                changed
+            }
+            ("overlay_corner", SettingValue::Text(v)) => {
+                let corner = if matches!(
+                    v.as_str(),
+                    "bottom-left" | "bottom-right" | "top-left" | "top-right"
+                ) {
+                    v.clone()
+                } else {
+                    "bottom-right".to_string()
+                };
+                let changed = settings.overlay_corner != corner;
+                settings.overlay_corner = corner;
+                changed
+            }
+            ("overlay_scale", SettingValue::Int(v)) => {
+                let scale = (*v).clamp(75, 150) as i32;
+                let changed = settings.overlay_scale != scale;
+                settings.overlay_scale = scale;
+                changed
+            }
+            ("overlay_opacity", SettingValue::Int(v)) => {
+                let opacity = (*v).clamp(30, 100) as i32;
+                let changed = settings.overlay_opacity != opacity;
+                settings.overlay_opacity = opacity;
+                changed
+            }
             ("encoder", SettingValue::Text(v)) => {
                 let changed = settings.encoder != *v;
                 settings.encoder = v.clone();
@@ -732,6 +774,38 @@ mod tests {
     fn clip_is_refused_during_a_recording() {
         let action = clip_action(State::On, Mode::Recording, false);
         assert!(matches!(action, Action::Ignore(_)));
+    }
+
+    #[test]
+    fn overlay_settings_are_validated_before_they_are_stored() {
+        let mut settings = Settings::default();
+        assert!(settings.overlay_enabled);
+        assert!(SettingValue::Bool(false).apply(&mut settings, "overlay_enabled"));
+        assert!(!settings.overlay_enabled);
+        assert!(!SettingValue::Bool(false).apply(&mut settings, "overlay_enabled"));
+
+        assert!(SettingValue::Text("auto".into()).apply(&mut settings, "overlay_mode"));
+        assert_eq!(settings.overlay_mode, "auto");
+        // An unknown mode means "always", the safer of the two.
+        assert!(SettingValue::Text("sometimes".into()).apply(&mut settings, "overlay_mode"));
+        assert_eq!(settings.overlay_mode, "always");
+        assert!(!SettingValue::Text("always".into()).apply(&mut settings, "overlay_mode"));
+
+        assert!(SettingValue::Text("top-left".into()).apply(&mut settings, "overlay_corner"));
+        assert_eq!(settings.overlay_corner, "top-left");
+        assert!(SettingValue::Text("middle".into()).apply(&mut settings, "overlay_corner"));
+        assert_eq!(settings.overlay_corner, "bottom-right");
+
+        assert!(SettingValue::Int(500).apply(&mut settings, "overlay_scale"));
+        assert_eq!(settings.overlay_scale, 150);
+        assert!(SettingValue::Int(10).apply(&mut settings, "overlay_scale"));
+        assert_eq!(settings.overlay_scale, 75);
+
+        assert_eq!(settings.overlay_opacity, 92);
+        assert!(SettingValue::Int(10).apply(&mut settings, "overlay_opacity"));
+        assert_eq!(settings.overlay_opacity, 30);
+        assert!(SettingValue::Int(500).apply(&mut settings, "overlay_opacity"));
+        assert_eq!(settings.overlay_opacity, 100);
     }
 
     #[test]

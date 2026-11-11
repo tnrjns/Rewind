@@ -23,6 +23,7 @@ pub const RADIUS: CornerRadius = CornerRadius::same(10);
 
 /// Install the palette as the egui style. Call once, at startup.
 pub fn apply(ctx: &egui::Context) {
+    install_ui_font(ctx);
     ctx.all_styles_mut(|style| {
         let visuals = &mut style.visuals;
         *visuals = egui::Visuals::dark();
@@ -49,23 +50,53 @@ pub fn apply(ctx: &egui::Context) {
             &mut visuals.widgets.open,
         ] {
             state.fg_stroke.color = TEXT;
-            state.corner_radius = CornerRadius::same(8);
+            // The stylesheet's buttons, fields and menus all use a 6 px radius.
+            state.corner_radius = CornerRadius::same(6);
         }
         visuals.widgets.noninteractive.fg_stroke.color = MUTED;
 
         style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-        style.spacing.button_padding = egui::vec2(12.0, 6.0);
-        style.spacing.scroll.bar_width = 8.0;
+        style.spacing.button_padding = egui::vec2(16.0, 8.0);
+        style.spacing.scroll.bar_width = 10.0;
         style
             .text_styles
             .insert(egui::TextStyle::Heading, egui::FontId::proportional(24.0));
         style
             .text_styles
-            .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(13.0));
         style
             .text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
     });
+}
+
+/// Use the platform's own UI font, so the port renders like the app it replaces.
+///
+/// egui ships a light Ubuntu face; the Python app uses the system font (SF Pro on
+/// macOS, Segoe UI on Windows). A missing or unreadable file is not fatal — the
+/// bundled font stays in place.
+fn install_ui_font(ctx: &egui::Context) {
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &["/System/Library/Fonts/SFNS.ttf"]
+    } else if cfg!(target_os = "windows") {
+        &["C:\\Windows\\Fonts\\segoeui.ttf"]
+    } else {
+        &[]
+    };
+    let Some(bytes) = candidates.iter().find_map(|path| std::fs::read(path).ok()) else {
+        return;
+    };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "ui".to_string(),
+        std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "ui".to_string());
+    ctx.set_fonts(fonts);
 }
 
 /// The affirmative button in a dialog: monochrome accent, black text, like the
@@ -76,26 +107,77 @@ pub fn primary(label: &'static str) -> egui::Button<'static> {
         .corner_radius(CornerRadius::same(8))
 }
 
-/// The app mark: two left-pointing triangles, the shape the Python logo draws.
-pub fn rewind_glyph(ui: &mut egui::Ui, size: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
-    let painter = ui.painter();
-    let height = size * 0.58;
-    let width = height * 0.62;
-    let gap = width * 0.92;
-    let left = rect.center().x - (gap + width) / 2.0;
+/// The two left-pointing triangles, at `size` tall, centred on `centre`.
+///
+/// This is the Python app's `draw_rewind_glyph` to the point: its triangles sit a
+/// little left of centre, because the wide ends make them look off-centre otherwise.
+pub fn glyph(painter: &egui::Painter, centre: egui::Pos2, size: f32, color: Color32) {
+    let height = size;
+    let width = size * 0.62;
+    let left = centre.x - width + width * 0.08 - width * 0.14;
     for step in 0..2 {
-        let x = left + gap * step as f32;
+        let x = left + width * 0.92 * step as f32;
         painter.add(egui::Shape::convex_polygon(
             vec![
-                egui::pos2(x, rect.center().y),
-                egui::pos2(x + width, rect.center().y - height / 2.0),
-                egui::pos2(x + width, rect.center().y + height / 2.0),
+                egui::pos2(x, centre.y),
+                egui::pos2(x + width, centre.y - height / 2.0),
+                egui::pos2(x + width, centre.y + height / 2.0),
             ],
-            TEXT,
+            color,
             Stroke::NONE,
         ));
     }
+}
+
+/// The app mark, matching `theme.draw_logo`: a rounded tile, a thin border, a circular
+/// arrow that ends in a solid head, and the rewind glyph in the middle.
+pub fn logo(painter: &egui::Painter, rect: egui::Rect) {
+    let size = rect.width().min(rect.height());
+    let square = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(size));
+    let corner = CornerRadius::same((size * 0.24).round() as u8);
+    painter.rect_filled(square, corner, SIDEBAR);
+    painter.rect_stroke(
+        square.shrink(0.5),
+        corner,
+        Stroke::new((size * 0.025).max(1.0), Color32::from_rgb(0x77, 0x77, 0x77)),
+        StrokeKind::Inside,
+    );
+
+    let centre = square.center();
+    let radius = size * 0.31;
+    let width = (size * 0.085).max(1.5);
+    let start = 125.0_f32.to_radians();
+    let span = 290.0_f32.to_radians();
+    let point = |angle: f32| {
+        egui::pos2(
+            centre.x + radius * angle.cos(),
+            centre.y - radius * angle.sin(),
+        )
+    };
+    let points: Vec<egui::Pos2> = (0..=48)
+        .map(|i| point(start + span * (i as f32 / 48.0)))
+        .collect();
+    painter.add(egui::Shape::line(points.clone(), Stroke::new(width, TEXT)));
+    // Round caps at both ends of the arc.
+    painter.circle_filled(points[0], width / 2.0, TEXT);
+    painter.circle_filled(*points.last().unwrap_or(&centre), width / 2.0, TEXT);
+
+    // Arrow head at the end of the arc, pointing along the direction of travel.
+    let end = start + span;
+    let tip = point(end);
+    let tangent = egui::vec2(-end.sin(), -end.cos());
+    let normal = egui::vec2(-tangent.y, tangent.x);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            tip + tangent * (size * 0.13),
+            tip + normal * (size * 0.11),
+            tip - normal * (size * 0.11),
+        ],
+        TEXT,
+        Stroke::NONE,
+    ));
+
+    glyph(painter, centre, size * 0.30, TEXT);
 }
 
 /// [`primary`] with an owned label, for buttons whose text changes.

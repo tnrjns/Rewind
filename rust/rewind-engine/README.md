@@ -121,8 +121,7 @@ because Qt declared awareness at startup.
 
 ## Not ported
 
-Sounds, updates, single-instance plumbing and the remaining settings pages stay in
-`app/` for now. This crate hands them the same primitives the Python controller used:
+Updates, single-instance plumbing and the General page stay in `app/` for now. This crate hands them the same primitives the Python controller used:
 `Settings`, `Recorder` + `Event`, `take_screenshot`, `trim_clip`, `load_meta`,
 `list_monitors`, `list_microphones`.
 

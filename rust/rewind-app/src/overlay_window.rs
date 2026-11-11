@@ -36,6 +36,77 @@ pub fn ns_collection_behavior() -> u64 {
     NS_COLLECTION_CAN_JOIN_ALL_SPACES | NS_COLLECTION_FULL_SCREEN_AUXILIARY
 }
 
+/// The primary display's usable area, in physical pixels.
+///
+/// The pill must sit above the Dock or taskbar, not behind it, so it is placed in the
+/// work area rather than in the raw monitor bounds.
+pub fn work_area() -> Option<(i32, i32, i32, i32)> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+        };
+        // The primary monitor is the one containing the origin.
+        // SAFETY: both calls only read monitor geometry.
+        unsafe {
+            let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+            if monitor.is_invalid() {
+                return None;
+            }
+            let mut info = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+                return None;
+            }
+            let rect = info.rcWork;
+            Some((
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            ))
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::work_area()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        None
+    }
+}
+
+/// Find one of this process's windows by title.
+///
+/// egui's viewport API does not hand out the native handle of a secondary viewport, so
+/// the status pill is found by the title it was created with. The handle is registered
+/// with [`register_window`] before anything is sent to it.
+pub fn window_handle_by_title(title: &str) -> Option<u64> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::{HSTRING, PCWSTR};
+        use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+        let wide = HSTRING::from(title);
+        // SAFETY: the title is NUL-terminated and any thread may query window titles.
+        unsafe { FindWindowW(PCWSTR::null(), &wide) }
+            .ok()
+            .map(|handle| handle.0 as usize as u64)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::window_by_title(title).map(|view| view as usize as u64)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = title;
+        None
+    }
+}
+
 /// Hide a window with the given native handle from screen capture.
 ///
 /// Returns whether the platform accepted it. A `false` means the pill works but will
@@ -202,9 +273,169 @@ mod macos {
         }
     }
 
+    // AppKit must be loaded for `NSApplication` to exist; linking it here makes dyld
+    // initialise the framework at startup.
+    #[link(name = "AppKit", kind = "framework")]
+    extern "C" {}
+
     #[link(name = "objc")]
     extern "C" {
         fn sel_registerName(name: *const std::os::raw::c_char) -> *mut c_void;
+        fn objc_getClass(name: *const std::os::raw::c_char) -> *mut c_void;
+    }
+
+    fn class(name: &str) -> *mut c_void {
+        let c = std::ffi::CString::new(name).expect("class name has no NUL");
+        // SAFETY: NUL-terminated class name.
+        unsafe { objc_getClass(c.as_ptr()) }
+    }
+
+    /// `[obj selector]` returning an object pointer.
+    fn send_id(obj: *mut c_void, selector: &str) -> *mut c_void {
+        if obj.is_null() {
+            return std::ptr::null_mut();
+        }
+        let sel = selector_bytes(selector);
+        // SAFETY: the selector returns an object pointer and takes no arguments.
+        unsafe {
+            let name = objc_sel_registerName(sel.as_ptr());
+            let f: extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(obj, name)
+        }
+    }
+
+    /// `[obj selector:index]` for a collection.
+    fn send_index(obj: *mut c_void, selector: &str, index: isize) -> *mut c_void {
+        if obj.is_null() {
+            return std::ptr::null_mut();
+        }
+        let sel = selector_bytes(selector);
+        // SAFETY: objectAtIndex: takes an NSInteger and returns an object.
+        unsafe {
+            let name = objc_sel_registerName(sel.as_ptr());
+            let f: extern "C" fn(*mut c_void, *mut c_void, isize) -> *mut c_void =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(obj, name, index)
+        }
+    }
+
+    /// `[obj count]`.
+    fn count(obj: *mut c_void) -> isize {
+        if obj.is_null() {
+            return 0;
+        }
+        let sel = selector_bytes("count");
+        // SAFETY: count returns an NSInteger and takes no arguments.
+        unsafe {
+            let name = objc_sel_registerName(sel.as_ptr());
+            let f: extern "C" fn(*mut c_void, *mut c_void) -> isize =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(obj, name)
+        }
+    }
+
+    /// `[window title]` as a Rust string.
+    fn title(window: *mut c_void) -> String {
+        let string = send_id(window, "title");
+        if string.is_null() {
+            return String::new();
+        }
+        let sel = selector_bytes("UTF8String");
+        // SAFETY: UTF8String returns a NUL-terminated C string owned by the NSString,
+        // which is alive for the duration of this call.
+        unsafe {
+            let name = objc_sel_registerName(sel.as_ptr());
+            let f: extern "C" fn(*mut c_void, *mut c_void) -> *const std::os::raw::c_char =
+                std::mem::transmute(objc_msgSend as *const ());
+            let bytes = f(string, name);
+            if bytes.is_null() {
+                return String::new();
+            }
+            std::ffi::CStr::from_ptr(bytes)
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    /// A rectangle in Cocoa's points, origin bottom-left.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Rect {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    }
+
+    /// `[obj selector]` returning an NSRect.
+    fn rect(obj: *mut c_void, selector: &str) -> Rect {
+        let sel = selector_bytes(selector);
+        // SAFETY: both selectors return an NSRect by value, which is four doubles.
+        unsafe {
+            let name = objc_sel_registerName(sel.as_ptr());
+            let f: extern "C" fn(*mut c_void, *mut c_void) -> Rect =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(obj, name)
+        }
+    }
+
+    /// `[obj selector]` returning a CGFloat.
+    fn float(obj: *mut c_void, selector: &str) -> f64 {
+        let sel = selector_bytes(selector);
+        // SAFETY: both selectors return a CGFloat.
+        unsafe {
+            let name = objc_sel_registerName(sel.as_ptr());
+            let f: extern "C" fn(*mut c_void, *mut c_void) -> f64 =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(obj, name)
+        }
+    }
+
+    /// The menu-bar screen's visible frame, in physical pixels with the origin top-left,
+    /// which is the space window positions use.
+    pub fn work_area() -> Option<(i32, i32, i32, i32)> {
+        let screens = send_id(class("NSScreen"), "screens");
+        // The first screen is the one with the menu bar, matching Qt's primary screen.
+        let screen = send_index(screens, "objectAtIndex:", 0);
+        if screen.is_null() {
+            return None;
+        }
+        let frame = rect(screen, "frame");
+        let visible = rect(screen, "visibleFrame");
+        let scale = float(screen, "backingScaleFactor");
+        if frame.h <= 0.0 || visible.w <= 0.0 || visible.h <= 0.0 || scale <= 0.0 {
+            return None;
+        }
+        // Cocoa counts up from the bottom of the primary display; windows count down.
+        let top = frame.h - (visible.y + visible.h);
+        Some((
+            (visible.x * scale) as i32,
+            (top * scale) as i32,
+            (visible.w * scale) as i32,
+            (visible.h * scale) as i32,
+        ))
+    }
+
+    /// The content view of the app window with this title, if it exists.
+    ///
+    /// A view is returned rather than the window because [`exclude_from_capture`] treats
+    /// its handle as a view and asks it for the window.
+    pub fn window_by_title(wanted: &str) -> Option<*mut c_void> {
+        let app = send_id(class("NSApplication"), "sharedApplication");
+        if app.is_null() {
+            return None;
+        }
+        let windows = send_id(app, "windows");
+        for index in 0..count(windows) {
+            let window = send_index(windows, "objectAtIndex:", index);
+            if window.is_null() || title(window) != wanted {
+                continue;
+            }
+            let view = send_id(window, "contentView");
+            return (!view.is_null()).then_some(view);
+        }
+        None
     }
 
     #[allow(non_snake_case)]
