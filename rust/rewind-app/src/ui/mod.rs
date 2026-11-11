@@ -1,30 +1,105 @@
-//! The app window.
+//! The app window: the sidebar, the page header, and the pages themselves.
 //!
-//! One native window, opened from the tray or the open hotkey, showing the Clips page.
-//! Closing it hides it; Rewind keeps capturing in the tray, which is the whole point of
-//! the app.
+//! The window mirrors the Python app's layout — a 218 px rail with the brand, the page
+//! list and the capture state, and a scrolling page to its right — because the port is
+//! meant to look like the app it replaces, not like a new one.
 
 mod clips;
 mod dialogs;
 pub mod format;
+mod replay;
 mod theme;
+mod widgets;
 
 pub use clips::ClipsPage;
 pub use format::Filter;
 
 use std::path::Path;
 use std::sync::mpsc::{channel, Receiver};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use eframe::egui;
+use eframe::egui::{self, Align2, Color32, FontId, RichText, Sense, Vec2};
 
-use crate::controller::{Controller, Notice};
+use crate::controller::{Controller, Notice, SettingValue};
 use crate::hotkeys::HotkeyManager;
 use crate::tray::{TrayAction, TrayState};
 use rewind_engine::{Mode, State};
 
-/// The platform pieces the window needs, built by the binary before the window opens:
-/// the tray (menus must be made on the main thread), the hotkey manager and its queue.
+/// How long a capture setting has to sit still before the buffer restarts. The Python
+/// app used the same 900 ms, so dragging a slider across its range restarts once.
+const RESTART_DELAY: Duration = Duration::from_millis(900);
+
+/// A settings write a page is asking for.
+///
+/// Pages never call `Controller::set` themselves: the shell applies every change so all
+/// of them share one restart debounce.
+pub struct Change {
+    pub key: &'static str,
+    pub value: SettingValue,
+}
+
+impl Change {
+    pub fn new(key: &'static str, value: impl Into<SettingValue>) -> Change {
+        Change {
+            key,
+            value: value.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageKind {
+    Replay,
+    Clips,
+}
+
+impl PageKind {
+    /// The order the rail lists them in, matching the Python app's nav.
+    const ALL: [PageKind; 2] = [PageKind::Replay, PageKind::Clips];
+
+    fn label(self) -> &'static str {
+        match self {
+            PageKind::Replay => "Replay",
+            PageKind::Clips => "Clips",
+        }
+    }
+}
+
+enum Page {
+    Replay(replay::ReplayPage),
+    // Boxed: the Clips page carries textures, jobs and a selection, and the enum should
+    // not be sized for its largest member on every frame.
+    Clips(Box<ClipsPage>),
+}
+
+impl Page {
+    fn title(&self) -> &'static str {
+        match self {
+            Page::Replay(_) => "Replay",
+            Page::Clips(_) => "Clips",
+        }
+    }
+
+    fn subtitle(&self) -> Option<&'static str> {
+        match self {
+            Page::Replay(_) => Some(replay::ReplayPage::SUBTITLE),
+            Page::Clips(_) => None,
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, controller: &mut Controller) -> Vec<Change> {
+        match self {
+            Page::Replay(page) => page.ui(ui, controller),
+            Page::Clips(page) => {
+                page.ui(ui, controller);
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// The platform pieces the window needs, built by the binary before it opens: the tray
+/// (menus must be made on the main thread), the hotkey manager and the startup notices.
 pub struct Shell {
     pub hotkeys: Option<HotkeyManager>,
     #[cfg(feature = "tray")]
@@ -38,8 +113,8 @@ pub fn run(controller: Controller, shell: Shell) -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Rewind")
-            .with_inner_size([1120.0, 760.0])
-            .with_min_inner_size([780.0, 540.0]),
+            .with_inner_size([1040.0, 720.0])
+            .with_min_inner_size([900.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -51,21 +126,23 @@ pub fn run(controller: Controller, shell: Shell) -> eframe::Result {
 
 struct RewindApp {
     controller: Controller,
-    page: ClipsPage,
+    pages: [Page; 2],
+    current: usize,
     presses: Receiver<String>,
     hotkeys: Option<HotkeyManager>,
     #[cfg(feature = "tray")]
     tray: Option<crate::tray_ui::Tray>,
     last_tray_state: TrayState,
+    restart_due: Option<Instant>,
     quitting: bool,
 }
 
 impl RewindApp {
     fn new(cc: &eframe::CreationContext<'_>, controller: Controller, shell: Shell) -> RewindApp {
         theme::apply(&cc.egui_ctx);
-        let mut page = ClipsPage::new(&cc.egui_ctx);
+        let mut clips = ClipsPage::new(&cc.egui_ctx);
         for message in shell.startup {
-            page.notice(message);
+            clips.notice(message);
         }
         if controller.settings().start_replay_on_launch {
             controller.recorder().start();
@@ -84,12 +161,17 @@ impl RewindApp {
         let last_tray_state = TrayState::from_engine(controller.state(), controller.mode());
         RewindApp {
             controller,
-            page,
+            pages: [
+                Page::Replay(replay::ReplayPage::new()),
+                Page::Clips(Box::new(clips)),
+            ],
+            current: 0,
             presses,
             hotkeys: shell.hotkeys,
             #[cfg(feature = "tray")]
             tray: shell.tray,
             last_tray_state,
+            restart_due: None,
             quitting: false,
         }
     }
@@ -122,8 +204,21 @@ impl RewindApp {
     }
 
     fn absorb(&mut self, notices: Vec<Notice>) {
-        for notice in notices {
-            self.page.handle_notice(&notice);
+        if let Page::Clips(clips) = &mut self.pages[1] {
+            for notice in notices {
+                clips.handle_notice(&notice);
+            }
+        }
+    }
+
+    /// Apply what the page asked for, and schedule the one restart it may need.
+    fn apply_changes(&mut self, changes: Vec<Change>) {
+        for change in changes {
+            let (notices, restart) = self.controller.set(change.key, change.value);
+            self.absorb(notices);
+            if restart {
+                self.restart_due = Some(Instant::now() + RESTART_DELAY);
+            }
         }
     }
 
@@ -152,11 +247,48 @@ impl RewindApp {
             }
         }
     }
+
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().item_spacing.y = 3.0;
+        ui.horizontal(|ui| {
+            theme::rewind_glyph(ui, 30.0);
+            ui.add_space(7.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.label(RichText::new("Rewind").size(18.0).strong());
+                ui.label(
+                    RichText::new("Instant Replay")
+                        .size(11.0)
+                        .color(theme::MUTED),
+                );
+            });
+        });
+        ui.add_space(22.0);
+
+        for (index, kind) in PageKind::ALL.iter().enumerate() {
+            if nav_button(ui, kind.label(), index == self.current) {
+                self.current = index;
+            }
+        }
+
+        // The capture state sits at the bottom of the rail, as it does in the Python app.
+        ui.add_space((ui.available_height() - 26.0).max(0.0));
+        let (text, active) = status_line(self.controller.state(), self.controller.mode());
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+            ui.painter().circle_filled(
+                rect.center(),
+                4.0,
+                if active { theme::GREEN } else { theme::SUBTLE },
+            );
+            ui.label(RichText::new(text).size(12.0).color(theme::MUTED));
+        });
+    }
 }
 
 impl eframe::App for RewindApp {
     /// Shell work, once per frame — and also while the window is hidden, which is what
-    /// keeps the hotkeys alive after the user closes the window.
+    /// keeps the hotkeys alive after the user closes it.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
             if self.has_tray() {
@@ -184,6 +316,15 @@ impl eframe::App for RewindApp {
         let notices = self.controller.pump(Duration::ZERO);
         self.absorb(notices);
 
+        if let Some(due) = self.restart_due {
+            if Instant::now() >= due {
+                self.restart_due = None;
+                self.controller.recorder().restart();
+            } else {
+                ctx.request_repaint_after(RESTART_DELAY);
+            }
+        }
+
         let state = TrayState::from_engine(self.controller.state(), self.controller.mode());
         if state != self.last_tray_state {
             #[cfg(feature = "tray")]
@@ -199,14 +340,50 @@ impl eframe::App for RewindApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let frame = egui::Frame::new()
-            .fill(theme::BG)
-            .inner_margin(egui::Margin::same(20));
-        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
-            self.header(ui);
-            ui.add_space(8.0);
-            self.page.ui(ui, &mut self.controller);
-        });
+        egui::Panel::left("rewind-nav")
+            .exact_size(218.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::SIDEBAR)
+                    .inner_margin(egui::Margin {
+                        left: 14,
+                        right: 14,
+                        top: 20,
+                        bottom: 16,
+                    }),
+            )
+            .show(ui, |ui| self.sidebar(ui));
+
+        let mut changes = Vec::new();
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin {
+                        left: 36,
+                        right: 36,
+                        top: 30,
+                        bottom: 30,
+                    }),
+            )
+            .show(ui, |ui| {
+                let Self {
+                    controller,
+                    pages,
+                    current,
+                    ..
+                } = self;
+                let page = &mut pages[*current];
+                ui.label(RichText::new(page.title()).size(26.0).strong());
+                if let Some(subtitle) = page.subtitle() {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(subtitle).size(13.0).color(theme::MUTED));
+                }
+                ui.add_space(16.0);
+                changes = page.ui(ui, controller);
+            });
+        self.apply_changes(changes);
     }
 }
 
@@ -216,35 +393,54 @@ impl Drop for RewindApp {
     }
 }
 
-impl RewindApp {
-    fn header(&self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Clips");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (text, color) = status_line(
-                    self.controller.state(),
-                    self.controller.mode(),
-                    self.controller.settings().clip_seconds,
-                );
-                ui.label(egui::RichText::new(text).size(12.5).color(color));
-            });
-        });
+/// A full-width rail entry: left-aligned, with hover and selected states.
+fn nav_button(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 30.0), Sense::click());
+    let hovered = response.hovered();
+    let fill = if selected {
+        Color32::from_rgb(0x30, 0x30, 0x30)
+    } else if hovered {
+        theme::CARD_2
+    } else {
+        Color32::TRANSPARENT
+    };
+    if fill != Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(6), fill);
     }
+    let color = if selected || hovered {
+        theme::TEXT
+    } else {
+        theme::MUTED
+    };
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        color,
+    );
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
-/// The one-line state shown opposite the page title.
-pub fn status_line(state: State, mode: Mode, clip_seconds: u32) -> (String, egui::Color32) {
+/// The one-line state shown at the bottom of the rail, and whether it is "live".
+pub fn status_line(state: State, mode: Mode) -> (String, bool) {
     if mode == Mode::Recording {
-        return ("Recording".to_string(), theme::WARN);
+        let text = if state == State::Starting {
+            "Starting recording…"
+        } else {
+            "Recording"
+        };
+        return (text.to_string(), true);
     }
     match state {
-        State::Saving => ("Saving recording…".to_string(), theme::WARN),
-        State::Starting => ("Starting…".to_string(), theme::MUTED),
-        State::On => (
-            format!("Instant Replay on · {clip_seconds} s"),
-            theme::GREEN,
-        ),
-        State::Off => ("Instant Replay off".to_string(), theme::SUBTLE),
+        State::On => ("Replay on".to_string(), true),
+        State::Starting => ("Starting…".to_string(), true),
+        State::Saving => ("Saving…".to_string(), true),
+        State::Off => ("Replay off".to_string(), false),
     }
 }
 
@@ -280,15 +476,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_status_line_names_what_is_running() {
+    fn the_rail_names_what_is_running() {
+        assert_eq!(status_line(State::On, Mode::Replay).0, "Replay on");
+        assert_eq!(status_line(State::Off, Mode::Off).0, "Replay off");
+        assert_eq!(status_line(State::On, Mode::Recording).0, "Recording");
         assert_eq!(
-            status_line(State::On, Mode::Replay, 30).0,
-            "Instant Replay on · 30 s"
+            status_line(State::Starting, Mode::Recording).0,
+            "Starting recording…"
         );
-        assert_eq!(
-            status_line(State::Off, Mode::Off, 30).0,
-            "Instant Replay off"
-        );
-        assert_eq!(status_line(State::On, Mode::Recording, 30).0, "Recording");
+    }
+
+    #[test]
+    fn only_a_running_capture_lights_the_dot() {
+        assert!(status_line(State::On, Mode::Replay).1);
+        assert!(status_line(State::On, Mode::Recording).1);
+        assert!(!status_line(State::Off, Mode::Off).1);
     }
 }

@@ -365,8 +365,11 @@ impl Settings {
     fn clamp_and_migrate(&mut self) {
         self.clip_seconds = self.clip_seconds.clamp(15, 60);
         self.bitrate_mbps = self.bitrate_mbps.clamp(2, 200);
-        self.system_volume = self.system_volume.clamp(0, 100);
-        self.mic_volume = self.mic_volume.clamp(0, 100);
+        // 200%, not 100: the Python app offers a 0-200% slider and a value above 100
+        // boosts (gain 1.0-2.0), so clamping here would quietly weaken an install that
+        // had already chosen it.
+        self.system_volume = self.system_volume.clamp(0, 200);
+        self.mic_volume = self.mic_volume.clamp(0, 200);
         self.sound_volume = self.sound_volume.clamp(0, 100);
         if self.fps == 0 {
             self.fps = 60;

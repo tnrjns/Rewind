@@ -76,6 +76,28 @@ pub fn primary(label: &'static str) -> egui::Button<'static> {
         .corner_radius(CornerRadius::same(8))
 }
 
+/// The app mark: two left-pointing triangles, the shape the Python logo draws.
+pub fn rewind_glyph(ui: &mut egui::Ui, size: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
+    let painter = ui.painter();
+    let height = size * 0.58;
+    let width = height * 0.62;
+    let gap = width * 0.92;
+    let left = rect.center().x - (gap + width) / 2.0;
+    for step in 0..2 {
+        let x = left + gap * step as f32;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(x, rect.center().y),
+                egui::pos2(x + width, rect.center().y - height / 2.0),
+                egui::pos2(x + width, rect.center().y + height / 2.0),
+            ],
+            TEXT,
+            Stroke::NONE,
+        ));
+    }
+}
+
 /// Paint a card: fill, rounded border, nothing else.
 pub fn card(painter: &egui::Painter, rect: egui::Rect, fill: Color32, border: Option<Color32>) {
     painter.rect_filled(rect, RADIUS, fill);
