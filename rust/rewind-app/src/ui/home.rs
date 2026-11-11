@@ -62,6 +62,10 @@ impl HomePage {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, controller: &mut Controller) -> PageOutput {
         let mut output = PageOutput::default();
+        // Start the shared thumbnail frame: reset its decode budget and take in results.
+        if self.thumbs.begin() {
+            self.last_recent = Instant::now() - REFRESH_EVERY;
+        }
         // The buffer bar and elapsed clock move in tenths.
         ui.ctx().request_repaint_after(Duration::from_millis(100));
         if self.last_recent.elapsed() >= REFRESH_EVERY {
@@ -468,6 +472,11 @@ fn recent_card(ui: &mut egui::Ui, entry: &ClipEntry, thumbs: &mut Thumbs) {
             .layout(Layout::top_down(Align::Min)),
     );
 
+    if entry.kind == crate::controller::ClipKind::Video
+        && (entry.thumbnail.is_none() || entry.duration.is_none())
+    {
+        thumbs.request(entry.path.clone());
+    }
     let (thumb_rect, _) = child.allocate_exact_size(Vec2::new(160.0, 90.0), Sense::hover());
     match thumbs.texture(ui.ctx(), entry) {
         Some(texture) => {
@@ -501,9 +510,14 @@ fn recent_card(ui: &mut egui::Ui, entry: &ClipEntry, thumbs: &mut Thumbs) {
     child.add_space(6.0);
     child.add(
         egui::Label::new(
-            RichText::new(format::title(&entry.path))
-                .size(12.0)
-                .strong(),
+            RichText::new(
+                format::title(&entry.path)
+                    .trim_start_matches("Rewind_")
+                    .trim_start_matches("Screenshot_")
+                    .to_string(),
+            )
+            .size(12.0)
+            .strong(),
         )
         .truncate(),
     );
