@@ -92,7 +92,7 @@ pub fn window_handle_by_title(title: &str) -> Option<u64> {
         use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
         let wide = HSTRING::from(title);
         // SAFETY: the title is NUL-terminated and any thread may query window titles.
-        unsafe { FindWindowW(None::<PCWSTR>, &wide) }
+        unsafe { FindWindowW(PCWSTR::null(), &wide) }
             .ok()
             .map(|handle| handle.0 as usize as u64)
     }
