@@ -1361,12 +1361,65 @@ fn configure_child(cmd: &mut Command) {
 fn configure_child(_cmd: &mut Command) {}
 
 /// One capture command line: input, filters, encoder and expected size.
-struct Attempt {
-    name: String,
-    input: Vec<String>,
-    filters: Vec<String>,
+pub struct Attempt {
+    pub name: String,
+    pub input: Vec<String>,
+    pub filters: Vec<String>,
+    pub encoder: EncoderKind,
+    pub size: String,
+}
+
+impl Attempt {
+    /// Full FFmpeg argument list for capturing into `output`.
+    ///
+    /// Shared with the diagnostic so what it tests is exactly what the recorder runs,
+    /// rather than a copy that can drift.
+    pub fn args(&self, settings: &Settings, output: &Path) -> Vec<String> {
+        let mut args: Vec<String> = vec![
+            "-hide_banner".into(),
+            "-loglevel".into(),
+            "error".into(),
+            "-nostats".into(),
+            "-y".into(),
+        ];
+        args.extend(self.input.iter().cloned());
+        args.extend(self.filters.iter().cloned());
+        args.extend(["-map".into(), "0:v".into(), "-an".into()]);
+        args.extend(crate::ffmpeg::encoder_args(
+            self.encoder,
+            settings.codec,
+            settings.bitrate_mbps.max(2),
+            settings.fps.max(1),
+        ));
+        args.extend([
+            "-f".into(),
+            "matroska".into(),
+            output.to_string_lossy().into_owned(),
+        ]);
+        args
+    }
+}
+
+/// The capture command lines this machine would try, in order.
+///
+/// Public so a diagnostic can exercise each fallback on a real desktop; the recorder
+/// itself walks the same list.
+pub fn capture_plan(
+    settings: &Settings,
+    monitors: &[Monitor],
     encoder: EncoderKind,
-    size: String,
+    ffmpeg: &Path,
+    test_source: bool,
+) -> Vec<Attempt> {
+    build_attempts(
+        settings,
+        monitors,
+        encoder,
+        ffmpeg,
+        test_source,
+        Path::new("."),
+        None,
+    )
 }
 
 /// The fallback ladder: hardware encoder first, then the same source on CPU, then a
@@ -1903,4 +1956,116 @@ fn mux_recording(
     args.extend(["-movflags".into(), "+faststart".into()]);
     args.push(output.to_string_lossy().into_owned());
     ffmpeg::run(ffmpeg, &args, timeout, None)
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+    use crate::ffmpeg::EncoderKind;
+
+    fn settings() -> Settings {
+        let mut s = Settings::default();
+        s.fps = 30;
+        s.bitrate_mbps = 8;
+        s
+    }
+
+    fn monitors() -> Vec<Monitor> {
+        vec![Monitor {
+            name: "Display 1".into(),
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+            primary: true,
+            device: String::new(),
+        }]
+    }
+
+    /// The diagnostic's `Attempt::args` must stay identical to the recorder's own
+    /// command line, or it would report on a command the app never runs.
+    #[test]
+    fn plan_args_match_the_recorder_command_prefix() {
+        let settings = settings();
+        let plan = capture_plan(
+            &settings,
+            &monitors(),
+            EncoderKind::X264,
+            Path::new("/usr/bin/ffmpeg"),
+            true,
+        );
+        let attempt = plan.first().expect("a plan on every platform");
+        let out = Path::new("/tmp/x.mkv");
+        let args = attempt.args(&settings, out);
+
+        // The pieces the recorder builds before its output format.
+        let mut expected: Vec<String> = vec![
+            "-hide_banner".into(),
+            "-loglevel".into(),
+            "error".into(),
+            "-nostats".into(),
+            "-y".into(),
+        ];
+        expected.extend(attempt.input.iter().cloned());
+        expected.extend(attempt.filters.iter().cloned());
+        expected.extend(["-map".into(), "0:v".into(), "-an".into()]);
+        expected.extend(crate::ffmpeg::encoder_args(
+            attempt.encoder,
+            settings.codec,
+            settings.bitrate_mbps,
+            settings.fps,
+        ));
+        assert_eq!(args[..expected.len()], expected[..]);
+        assert_eq!(args[args.len() - 1], "/tmp/x.mkv");
+        assert!(args.contains(&"matroska".to_string()));
+    }
+
+    #[test]
+    fn the_test_source_plan_never_touches_the_screen() {
+        let plan = capture_plan(
+            &settings(),
+            &monitors(),
+            EncoderKind::VideoToolbox,
+            Path::new("/usr/bin/ffmpeg"),
+            true,
+        );
+        assert_eq!(plan.len(), 1);
+        let joined = plan[0].input.join(" ");
+        assert!(joined.contains("lavfi"), "{joined}");
+        assert!(joined.contains("testsrc2"), "{joined}");
+        assert_eq!(plan[0].encoder, EncoderKind::X264);
+    }
+
+    #[test]
+    fn the_plan_always_offers_a_cpu_path_when_hardware_could_fail() {
+        // Whichever platform this is, the ladder must end with something that can encode
+        // without a GPU — that is the whole point of the fallback.
+        let plan = capture_plan(
+            &settings(),
+            &monitors(),
+            EncoderKind::X264,
+            Path::new("/usr/bin/ffmpeg"),
+            false,
+        );
+        assert!(
+            plan.iter().any(|a| a.encoder == EncoderKind::X264),
+            "no CPU fallback in {:?}",
+            plan.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn every_plan_entry_has_a_name_and_an_input() {
+        for attempt in capture_plan(
+            &settings(),
+            &monitors(),
+            EncoderKind::X264,
+            Path::new("/usr/bin/ffmpeg"),
+            false,
+        ) {
+            assert!(!attempt.name.is_empty());
+            assert!(!attempt.input.is_empty(), "{} has no input", attempt.name);
+            assert!(!attempt.size.is_empty());
+        }
+    }
 }
