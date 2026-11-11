@@ -33,7 +33,7 @@ use crate::ffmpeg::{
     self, detect_encoders, download_ffmpeg_mac, encoder_args, find_ffmpeg, probe_duration,
     resolve_encoder, EncoderKind,
 };
-use crate::meta::{make_thumbnail, update_meta};
+use crate::meta::{make_thumbnail_at, update_meta_at};
 use crate::paths::{data_dir, unique_path};
 use crate::platform::{
     avf_screen_input, clamp_monitor, list_monitors, screen_capture_allowed, Monitor,
@@ -161,6 +161,9 @@ struct Core {
 
 /// Paths and flags that never change for the life of a recorder.
 struct Env {
+    /// The folder this recorder owns; metadata and thumbnails go here, not into the
+    /// user's data folder, so tests and side-by-side instances cannot pollute it.
+    data_root: PathBuf,
     buf_dir: PathBuf,
     work_dir: PathBuf,
     log_path: PathBuf,
@@ -235,6 +238,7 @@ impl Recorder {
         let recorder = Recorder {
             core: Arc::new(Mutex::new(core)),
             env: Env {
+                data_root: data_root.to_path_buf(),
                 buf_dir,
                 work_dir,
                 log_path,
@@ -405,6 +409,7 @@ impl Recorder {
             let core = self.lock();
             ClipJob {
                 ffmpeg: core.ffmpeg.clone(),
+                data_root: self.env.data_root.clone(),
                 buf_dir: self.env.buf_dir.clone(),
                 work_dir: self.env.work_dir.clone(),
                 log_path: self.env.log_path.clone(),
@@ -437,6 +442,7 @@ impl Recorder {
     fn spawn_worker(&self, rx: Receiver<Cmd>) {
         let core = Arc::clone(&self.core);
         let env = Env {
+            data_root: self.env.data_root.clone(),
             buf_dir: self.env.buf_dir.clone(),
             work_dir: self.env.work_dir.clone(),
             log_path: self.env.log_path.clone(),
@@ -1214,7 +1220,8 @@ impl Worker {
 
         cleanup_recording(&video, &tracks);
         self.reset_recording();
-        let _ = update_meta(
+        let _ = update_meta_at(
+            &self.env.data_root,
             &crate::paths::meta_key(&out),
             &[(
                 "duration",
@@ -1228,7 +1235,7 @@ impl Worker {
                 duration,
             });
         }
-        if make_thumbnail(&ffmpeg, &out, Some(duration)).is_some() {
+        if make_thumbnail_at(&self.env.data_root, &ffmpeg, &out, Some(duration)).is_some() {
             self.emit(Event::ThumbnailReady(out));
         }
     }
@@ -1607,6 +1614,7 @@ struct AudioSource {
 /// Everything a clip needs, captured so the save thread never touches engine state.
 struct ClipJob {
     ffmpeg: Option<PathBuf>,
+    data_root: PathBuf,
     buf_dir: PathBuf,
     work_dir: PathBuf,
     log_path: PathBuf,
@@ -1816,7 +1824,8 @@ impl ClipJob {
             return Err("Couldn't write the clip file".into());
         }
 
-        let _ = update_meta(
+        let _ = update_meta_at(
+            &self.data_root,
             &crate::paths::meta_key(&out),
             &[(
                 "duration",
@@ -1827,7 +1836,7 @@ impl ClipJob {
             path: out.clone(),
             duration,
         });
-        if make_thumbnail(&ffmpeg, &out, Some(duration)).is_some() {
+        if make_thumbnail_at(&self.data_root, &ffmpeg, &out, Some(duration)).is_some() {
             self.emit(Event::ThumbnailReady(out));
         }
         Ok(())

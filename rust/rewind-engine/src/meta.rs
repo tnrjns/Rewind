@@ -9,7 +9,9 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use crate::ffmpeg::run;
-use crate::paths::{data_dir, meta_key as path_meta_key, sub_dir, thumb_path, write_atomic};
+use crate::paths::{
+    data_dir, meta_key as path_meta_key, sub_dir, thumb_path, thumb_path_in, write_atomic,
+};
 
 /// Serialises read-modify-write cycles so two clips finishing at once cannot lose an entry.
 static META_LOCK: Mutex<()> = Mutex::new(());
@@ -24,16 +26,21 @@ pub fn meta_path() -> PathBuf {
     data_dir().join("clips.json")
 }
 
+/// `clips.json` under an explicit data root.
+pub fn meta_path_in(root: &Path) -> PathBuf {
+    root.join("clips.json")
+}
+
 /// Everything `clips.json` says about one file, keyed by file stem.
 pub type Meta = BTreeMap<String, Map<String, Value>>;
 
 pub fn load_meta() -> Meta {
     let _guard = meta_lock();
-    load_meta_unlocked()
+    load_meta_at(&data_dir())
 }
 
-fn load_meta_unlocked() -> Meta {
-    let Ok(bytes) = fs::read(meta_path()) else {
+fn load_meta_at(root: &Path) -> Meta {
+    let Ok(bytes) = fs::read(meta_path_in(root)) else {
         return Meta::new();
     };
     match serde_json::from_slice::<Value>(&bytes) {
@@ -50,22 +57,29 @@ fn load_meta_unlocked() -> Meta {
 
 /// Record a duration (or any other field) for one saved file.
 pub fn update_meta(name: &str, values: &[(&str, Value)]) -> std::io::Result<()> {
+    update_meta_at(&data_dir(), name, values)
+}
+
+/// [`update_meta`], but under an explicit data root — what a recorder with its own
+/// folders (tests, side-by-side instances) must use so it never writes into the user's
+/// `clips.json`.
+pub fn update_meta_at(root: &Path, name: &str, values: &[(&str, Value)]) -> std::io::Result<()> {
     let _guard = meta_lock();
-    let mut meta = load_meta_unlocked();
+    let mut meta = load_meta_at(root);
     let entry = meta.entry(name.to_string()).or_default();
     for (k, v) in values {
         entry.insert((*k).to_string(), v.clone());
     }
-    write_meta_unlocked(&meta)
+    write_meta_at(root, &meta)
 }
 
-fn write_meta_unlocked(meta: &Meta) -> std::io::Result<()> {
+fn write_meta_at(root: &Path, meta: &Meta) -> std::io::Result<()> {
     let value = Value::Object(
         meta.iter()
             .map(|(k, v)| (k.clone(), Value::Object(v.clone())))
             .collect(),
     );
-    write_atomic(&meta_path(), &serde_json::to_vec(&value)?)
+    write_atomic(&meta_path_in(root), &serde_json::to_vec(&value)?)
 }
 
 /// Carry a clip's metadata over to a new name after the file was renamed.
@@ -75,10 +89,10 @@ fn write_meta_unlocked(meta: &Meta) -> std::io::Result<()> {
 /// Returns whether an entry existed to move.
 pub fn rename_entry(old: &str, new: &str) -> std::io::Result<bool> {
     let _guard = meta_lock();
-    let mut meta = load_meta_unlocked();
+    let mut meta = load_meta_at(&data_dir());
     let moved = move_entry(&mut meta, old, new);
     if moved {
-        write_meta_unlocked(&meta)?;
+        write_meta_at(&data_dir(), &meta)?;
     }
     Ok(moved)
 }
@@ -105,7 +119,17 @@ pub fn meta_duration(name: &str) -> Option<f64> {
 /// Tries one second in (more representative than a black first frame), then falls
 /// back to frame zero for clips shorter than a second.
 pub fn make_thumbnail(ffmpeg: &Path, video: &Path, duration: Option<f64>) -> Option<PathBuf> {
-    let out = thumb_path(video);
+    make_thumbnail_at(&data_dir(), ffmpeg, video, duration)
+}
+
+/// [`make_thumbnail`] under an explicit data root.
+pub fn make_thumbnail_at(
+    root: &Path,
+    ffmpeg: &Path,
+    video: &Path,
+    duration: Option<f64>,
+) -> Option<PathBuf> {
+    let out = thumb_path_in(root, video);
     if let Some(parent) = out.parent() {
         let _ = fs::create_dir_all(parent);
     }
