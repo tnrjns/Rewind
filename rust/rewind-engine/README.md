@@ -107,3 +107,17 @@ The UI, tray, overlay, hotkeys, sounds, updates and single-instance plumbing sta
 `app/` for now. This crate hands them the same primitives the Python controller used:
 `Settings`, `Recorder` + `Event`, `take_screenshot`, `trim_clip`, `load_meta`,
 `list_monitors`, `list_microphones`.
+
+## Before pushing
+
+CI enforces these, and a formatting slip fails the build before any test runs:
+
+```
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Run `cargo fmt --all` before committing. The workspace has two crates (`rewind-engine`
+and `rewind-app`), so `--all` and `--workspace` matter — a bare `cargo fmt` only checks
+the crate you happen to be in.

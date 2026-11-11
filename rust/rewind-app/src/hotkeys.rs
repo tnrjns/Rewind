@@ -557,7 +557,6 @@ mod backend {
     ///
     /// Synthetic key presses never reach `RegisterEventHotKey`, so this is how a press
     /// can be simulated: it goes through the same dispatch path a real one would.
-    #[cfg(test)]
     pub fn post_hotkey_press(id: u32) {
         #[link(name = "Carbon", kind = "framework")]
         extern "C" {
@@ -718,6 +717,20 @@ pub(crate) fn dispatch(action: &str) {
         }
     }
 }
+
+/// Simulate a press of the hotkey registered in position `index` (0-based).
+///
+/// Synthetic key presses never reach `RegisterEventHotKey` — the OS drops them — so
+/// this posts the hotkey event directly. It exercises the same dispatch path a real
+/// keypress uses, which is what makes it useful for tests and demos.
+#[cfg(target_os = "macos")]
+pub fn inject_press(index: u32) {
+    backend::post_hotkey_press(index + 1);
+}
+
+/// See the macOS version; hotkeys are not driven this way on other platforms.
+#[cfg(not(target_os = "macos"))]
+pub fn inject_press(_index: u32) {}
 
 /// Install the process-wide handler used by the platform callbacks.
 pub fn set_global_handler<F>(handler: F)
